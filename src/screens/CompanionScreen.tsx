@@ -122,8 +122,50 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [attachedFile, setAttachedFile] = useState<string | null>(null);
+  const [spokenTranscript, setSpokenTranscript] = useState<string>('');
+  const recognitionRef = useRef<any>(null);
   const feedEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Live Speech Recognition for Voice Stream
+  useEffect(() => {
+    if (voiceStreamOpen) {
+      setSpokenTranscript('');
+      const SpeechRecognition =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        try {
+          const recognition = new SpeechRecognition();
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.lang = 'en-US';
+
+          recognition.onresult = (event: any) => {
+            let current = '';
+            for (let i = 0; i < event.results.length; i++) {
+              current += event.results[i][0].transcript + ' ';
+            }
+            if (current.trim()) {
+              setSpokenTranscript(current.trim());
+            }
+          };
+
+          recognition.onerror = () => {};
+          recognition.start();
+          recognitionRef.current = recognition;
+        } catch (e) {
+          console.debug('Speech recognition init error:', e);
+        }
+      }
+    } else {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+        recognitionRef.current = null;
+      }
+    }
+  }, [voiceStreamOpen]);
 
   const INITIAL_CONVERSATION: ChatMessage[] = useMemo(
     () => [
@@ -436,6 +478,70 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({
 
       setMessages((prev) => [...prev, companionResponse]);
     }, 1400);
+  };
+
+  // Real Message Regeneration Logic
+  const handleRegenerateMessage = (msgId: string) => {
+    triggerHaptic(ImpactStyle.Medium);
+    showToast(`Regenerating ${activePersona.name} distillation...`);
+    setIsTyping(true);
+
+    setTimeout(() => {
+      setIsTyping(false);
+      triggerHaptic(ImpactStyle.Light);
+
+      setMessages((prev) => {
+        const msgIndex = prev.findIndex((m) => m.id === msgId);
+        const precedingUserMsg = prev
+          .slice(0, msgIndex >= 0 ? msgIndex : prev.length)
+          .reverse()
+          .find((m) => m.sender === 'user');
+        const queryText = precedingUserMsg?.text || 'focus and cognitive rhythm optimization';
+
+        const regenerated: ChatMessage = {
+          id: `msg-${Date.now()}`,
+          sender: 'companion',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          structuredContent: {
+            type: 'generic-card',
+            title: `${activePersona.name} Distillation (${activePersona.title})`,
+            description: `Refined synthesis for: "${queryText.slice(0, 48)}${queryText.length > 48 ? '...' : ''}"`,
+            steps: [
+              {
+                num: 1,
+                title: 'High-Impact Vector',
+                desc: `Calibrated with ${activePersona.name} methodology to reduce cognitive friction.`
+              },
+              {
+                num: 2,
+                title: 'Time-Blocked Execution',
+                desc: 'Consolidate effort into uninterrupted intervals with immediate milestone verification.'
+              },
+              {
+                num: 3,
+                title: 'Active Retention',
+                desc: 'Capture delta notes directly into your Kairos memory log.'
+              }
+            ],
+            ruleOfThumb: 'Momentum creates clarity: take the simplest high-leverage action next.',
+            deviceAction: {
+              actionType: 'Refined Action',
+              title: `Action: ${queryText.slice(0, 24)}...`,
+              subtitle: 'Updated in Neural Memory Queue',
+              xpReward: '+10 HP Flow',
+              memoryCategory: 'Memory: Optimized Flow'
+            }
+          }
+        };
+
+        if (msgIndex >= 0) {
+          const next = [...prev];
+          next[msgIndex] = regenerated;
+          return next;
+        }
+        return [...prev, regenerated];
+      });
+    }, 1000);
   };
 
   return (
@@ -935,12 +1041,7 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({
                     aria-label="Regenerate message"
                     className="hover:text-slate-600 active:scale-95 transition-all cursor-pointer"
                     type="button"
-                    onClick={() => {
-                      triggerHaptic(ImpactStyle.Medium);
-                      showToast('Regenerating distillation...');
-                      setIsTyping(true);
-                      setTimeout(() => setIsTyping(false), 900);
-                    }}
+                    onClick={() => handleRegenerateMessage(msg.id)}
                   >
                     <svg
                       className="w-4 h-4"
@@ -1545,10 +1646,15 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({
             </div>
 
             <div>
-              <h3 className="text-xl font-extrabold text-white">Listening to your thoughts...</h3>
+              <h3 className="text-xl font-extrabold text-white">
+                {spokenTranscript ? 'Transcribing your voice...' : 'Listening to your thoughts...'}
+              </h3>
               <p className="text-sm text-slate-300 max-w-xs mt-1 font-medium">
-                Speak freely. {activePersona.name} will distill key insights and automatically schedule
-                action reminders.
+                {spokenTranscript ? (
+                  <span className="text-indigo-300 italic font-normal">"{spokenTranscript}"</span>
+                ) : (
+                  `Speak freely. ${activePersona.name} will distill key insights and automatically schedule action reminders.`
+                )}
               </p>
             </div>
           </div>
@@ -1558,8 +1664,15 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({
               onClick={() => {
                 triggerHaptic(ImpactStyle.Medium);
                 setVoiceStreamOpen(false);
-                setInputValue('Summarized key takeaways from my morning focus block');
-                showToast('Transcribed voice speech into prompt');
+                const finalPrompt =
+                  spokenTranscript.trim() ||
+                  'Summarized key takeaways from my morning focus block';
+                setInputValue(finalPrompt);
+                showToast(
+                  spokenTranscript.trim()
+                    ? 'Captured speech transcription into prompt'
+                    : 'Transcribed voice speech into prompt'
+                );
               }}
               className="w-full py-3.5 rounded-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold text-sm shadow-lg active:scale-95 transition-transform cursor-pointer"
               type="button"

@@ -2,6 +2,11 @@ import React, { useState, useMemo, useEffect } from 'react';
 import QRCode from 'qrcode';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { AppTopBar } from '../components/AppTopBar';
+import {
+  STORAGE_DOMAINS,
+  getUserScopedJSON,
+  setUserScopedJSON
+} from '../features/storage';
 
 export interface ConnectionsScreenProps {
   userProfile?: { email: string; name: string } | null;
@@ -693,7 +698,9 @@ export const TopAchievementsShowcase: React.FC<{
   );
 };
 
-const INITIAL_CONNECTIONS: ConnectionUser[] = [
+export const INITIAL_CONNECTIONS: ConnectionUser[] = [];
+
+export const SAMPLE_CONNECTIONS: ConnectionUser[] = [
   {
     id: 'conn-jordan',
     name: 'Jordan Hayes',
@@ -1177,7 +1184,9 @@ const INITIAL_CONNECTIONS: ConnectionUser[] = [
   }
 ];
 
-const INITIAL_INCOMING_REQUESTS: PendingRequest[] = [
+export const INITIAL_INCOMING_REQUESTS: PendingRequest[] = [];
+
+export const SAMPLE_INCOMING_REQUESTS: PendingRequest[] = [
   {
     id: 'req-in-1',
     name: 'Dr. Clara Thorne',
@@ -1219,7 +1228,9 @@ const INITIAL_INCOMING_REQUESTS: PendingRequest[] = [
   }
 ];
 
-const INITIAL_OUTGOING_REQUESTS: PendingRequest[] = [
+export const INITIAL_OUTGOING_REQUESTS: PendingRequest[] = [];
+
+export const SAMPLE_OUTGOING_REQUESTS: PendingRequest[] = [
   {
     id: 'req-out-1',
     name: 'Julian Frost',
@@ -1246,7 +1257,7 @@ const INITIAL_OUTGOING_REQUESTS: PendingRequest[] = [
   }
 ];
 
-const INITIAL_SUGGESTIONS: SuggestedUser[] = [
+export const INITIAL_SUGGESTIONS: SuggestedUser[] = [
   {
     id: 'sug-1',
     name: 'Kenji Sato',
@@ -1298,7 +1309,7 @@ const INITIAL_SUGGESTIONS: SuggestedUser[] = [
 ];
 
 export const ALL_SAMPLE_USERS: ConnectionUser[] = [
-  ...INITIAL_CONNECTIONS,
+  ...SAMPLE_CONNECTIONS,
   {
     id: 'conn-clara',
     name: 'Dr. Clara Thorne',
@@ -1672,11 +1683,65 @@ export const ConnectionsScreen: React.FC<ConnectionsScreenProps> = ({
   const [activeTab, setActiveTab] = useState<'connections' | 'requests' | 'discover'>('connections');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Lists
-  const [connections, setConnections] = useState<ConnectionUser[]>(INITIAL_CONNECTIONS);
-  const [incomingRequests, setIncomingRequests] = useState<PendingRequest[]>(INITIAL_INCOMING_REQUESTS);
-  const [outgoingRequests, setOutgoingRequests] = useState<PendingRequest[]>(INITIAL_OUTGOING_REQUESTS);
+  // Lists with User-Scoped Storage
+  const [connections, setConnections] = useState<ConnectionUser[]>(() => {
+    try {
+      const stored = getUserScopedJSON<ConnectionUser[]>(STORAGE_DOMAINS.CONNECTIONS, [], userProfile);
+      return Array.isArray(stored) ? stored : [];
+    } catch {
+      return [];
+    }
+  });
+  const [incomingRequests, setIncomingRequests] = useState<PendingRequest[]>(() => {
+    try {
+      const stored = getUserScopedJSON<PendingRequest[]>(STORAGE_DOMAINS.INCOMING_REQUESTS, [], userProfile);
+      return Array.isArray(stored) ? stored : [];
+    } catch {
+      return [];
+    }
+  });
+  const [outgoingRequests, setOutgoingRequests] = useState<PendingRequest[]>(() => {
+    try {
+      const stored = getUserScopedJSON<PendingRequest[]>(STORAGE_DOMAINS.OUTGOING_REQUESTS, [], userProfile);
+      return Array.isArray(stored) ? stored : [];
+    } catch {
+      return [];
+    }
+  });
   const [suggestedUsers, setSuggestedUsers] = useState<SuggestedUser[]>(INITIAL_SUGGESTIONS);
+
+  // Sync state when active userProfile changes
+  useEffect(() => {
+    try {
+      const storedConns = getUserScopedJSON<ConnectionUser[]>(STORAGE_DOMAINS.CONNECTIONS, [], userProfile);
+      const storedIn = getUserScopedJSON<PendingRequest[]>(STORAGE_DOMAINS.INCOMING_REQUESTS, [], userProfile);
+      const storedOut = getUserScopedJSON<PendingRequest[]>(STORAGE_DOMAINS.OUTGOING_REQUESTS, [], userProfile);
+      setConnections(Array.isArray(storedConns) ? storedConns : []);
+      setIncomingRequests(Array.isArray(storedIn) ? storedIn : []);
+      setOutgoingRequests(Array.isArray(storedOut) ? storedOut : []);
+    } catch {}
+  }, [userProfile]);
+
+  const saveConnections = (updated: ConnectionUser[]) => {
+    setConnections(updated);
+    try {
+      setUserScopedJSON(STORAGE_DOMAINS.CONNECTIONS, updated, userProfile);
+    } catch {}
+  };
+
+  const saveIncomingRequests = (updated: PendingRequest[]) => {
+    setIncomingRequests(updated);
+    try {
+      setUserScopedJSON(STORAGE_DOMAINS.INCOMING_REQUESTS, updated, userProfile);
+    } catch {}
+  };
+
+  const saveOutgoingRequests = (updated: PendingRequest[]) => {
+    setOutgoingRequests(updated);
+    try {
+      setUserScopedJSON(STORAGE_DOMAINS.OUTGOING_REQUESTS, updated, userProfile);
+    } catch {}
+  };
 
   // Modals & Feedback
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -1731,7 +1796,8 @@ export const ConnectionsScreen: React.FC<ConnectionsScreenProps> = ({
   // Handlers for Request actions
   const handleAcceptRequest = (req: PendingRequest) => {
     triggerHaptic(ImpactStyle.Medium);
-    setIncomingRequests((prev) => prev.filter((r) => r.id !== req.id));
+    const updatedIncoming = incomingRequests.filter((r) => r.id !== req.id);
+    saveIncomingRequests(updatedIncoming);
 
     // Add to connections
     const newConnection: ConnectionUser = {
@@ -1797,19 +1863,22 @@ export const ConnectionsScreen: React.FC<ConnectionsScreenProps> = ({
         showLiveStatus: true
       }
     };
-    setConnections((prev) => [newConnection, ...prev]);
+    const updatedConns = [newConnection, ...connections.filter((c) => c.id !== newConnection.id)];
+    saveConnections(updatedConns);
     showToast(`🎉 Connected with ${req.name}! +50 Synergy XP unlocked`);
   };
 
   const handleDeclineRequest = (reqId: string, name: string) => {
     triggerHaptic(ImpactStyle.Light);
-    setIncomingRequests((prev) => prev.filter((r) => r.id !== reqId));
+    const updatedIncoming = incomingRequests.filter((r) => r.id !== reqId);
+    saveIncomingRequests(updatedIncoming);
     showToast(`Request from ${name} declined`);
   };
 
   const handleCancelOutgoing = (reqId: string, name: string) => {
     triggerHaptic(ImpactStyle.Light);
-    setOutgoingRequests((prev) => prev.filter((r) => r.id !== reqId));
+    const updatedOutgoing = outgoingRequests.filter((r) => r.id !== reqId);
+    saveOutgoingRequests(updatedOutgoing);
     showToast(`Invitation to ${name} canceled`);
   };
 
@@ -1830,7 +1899,8 @@ export const ConnectionsScreen: React.FC<ConnectionsScreenProps> = ({
       timestamp: 'Sent just now',
       type: 'outgoing'
     };
-    setOutgoingRequests((prev) => [newOutgoing, ...prev]);
+    const updatedOutgoing = [newOutgoing, ...outgoingRequests.filter((r) => r.id !== newOutgoing.id)];
+    saveOutgoingRequests(updatedOutgoing);
     showToast(`✨ Connection request sent to ${sug.name}!`);
   };
 
@@ -1869,10 +1939,11 @@ export const ConnectionsScreen: React.FC<ConnectionsScreenProps> = ({
   const handleConnectDirectly = (user: ConnectionUser) => {
     triggerHaptic(ImpactStyle.Medium);
     const isAlready = connections.some(
-      (c) => c.id === user.id || c.username.toLowerCase() === user.username.toLowerCase()
+      (c) => c.id === user.id || (c.username && user.username && c.username.toLowerCase() === user.username.toLowerCase())
     );
     if (!isAlready) {
-      setConnections((prev) => [user, ...prev]);
+      const updatedConns = [user, ...connections];
+      saveConnections(updatedConns);
       showToast(`🎉 Connected with ${user.name}! +50 XP Unlocked`);
     } else {
       showToast(`Already connected with ${user.name}`);
@@ -1881,7 +1952,8 @@ export const ConnectionsScreen: React.FC<ConnectionsScreenProps> = ({
 
   const handleRemoveConnection = (userId: string, name: string) => {
     triggerHaptic(ImpactStyle.Medium);
-    setConnections((prev) => prev.filter((c) => c.id !== userId));
+    const updatedConns = connections.filter((c) => c.id !== userId);
+    saveConnections(updatedConns);
     setSelectedUserDetail(null);
     showToast(`Removed ${name} from your connections.`);
   };

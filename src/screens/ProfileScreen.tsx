@@ -165,8 +165,24 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [isFlashlightOn, setIsFlashlightOn] = useState(false);
   const [scanInputText, setScanInputText] = useState('');
   const [scannedUserDetail, setScannedUserDetail] = useState<ConnectionUser | null>(null);
-  const [connectedUserIds, setConnectedUserIds] = useState<string[]>([]);
+  const [connectedUserIds, setConnectedUserIds] = useState<string[]>(() => {
+    try {
+      const conns = getUserScopedJSON<ConnectionUser[]>(STORAGE_DOMAINS.CONNECTIONS, [], userProfile);
+      return Array.isArray(conns) ? conns.map((c) => c.id) : [];
+    } catch {
+      return [];
+    }
+  });
   const [isAchievementsModalOpen, setIsAchievementsModalOpen] = useState(false);
+
+  const connectionsCount = useMemo(() => {
+    try {
+      const conns = getUserScopedJSON<ConnectionUser[]>(STORAGE_DOMAINS.CONNECTIONS, [], userProfile);
+      return Array.isArray(conns) ? conns.length : 0;
+    } catch {
+      return 0;
+    }
+  }, [userProfile, connectedUserIds]);
 
   const weeklyRhythm = useMemo(
     () => calculateWeeklyRhythm(progression.rawState.taskHistory),
@@ -380,7 +396,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
   const handleConnectScannedUser = (user: ConnectionUser) => {
     triggerHaptic(ImpactStyle.Medium);
-    if (!connectedUserIds.includes(user.id)) {
+    const existing = getUserScopedJSON<ConnectionUser[]>(STORAGE_DOMAINS.CONNECTIONS, [], userProfile);
+    const isAlready = existing.some(
+      (c) => c.id === user.id || (c.username && user.username && c.username.toLowerCase() === user.username.toLowerCase())
+    );
+    if (!isAlready) {
+      const updated = [user, ...existing];
+      setUserScopedJSON(STORAGE_DOMAINS.CONNECTIONS, updated, userProfile);
       setConnectedUserIds((prev) => [...prev, user.id]);
       showToast(`🎉 Connected with ${user.name}! +50 XP Unlocked`);
     } else {
@@ -502,7 +524,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                     className="flex flex-col cursor-pointer active:scale-95 transition-transform"
                   >
                     <span className="text-base font-extrabold text-on-surface tracking-tight leading-tight">
-                      48
+                      {connectionsCount}
                     </span>
                     <span className="text-[11px] text-on-surface-variant font-medium">
                       Connections

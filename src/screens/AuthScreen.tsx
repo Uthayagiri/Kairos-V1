@@ -21,7 +21,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
 
   const toggleAuthMode = (newMode: AuthMode) => {
     try {
-      Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
+      Haptics.impact({ style: ImpactStyle.Light }).catch(() => { });
     } catch {
       // Fallback
     }
@@ -31,7 +31,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
 
   const handleSocialAuth = (provider: 'Apple' | 'Google') => {
     try {
-      Haptics.impact({ style: ImpactStyle.Medium }).catch(() => {});
+      Haptics.impact({ style: ImpactStyle.Medium }).catch(() => { });
     } catch {
       // Fallback
     }
@@ -52,7 +52,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      Haptics.impact({ style: ImpactStyle.Medium }).catch(() => {});
+      Haptics.impact({ style: ImpactStyle.Medium }).catch(() => { });
     } catch {
       // Fallback
     }
@@ -168,11 +168,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
               type="button"
               id="tab-create"
               onClick={() => toggleAuthMode('create')}
-              className={`flex-1 py-2 rounded-full text-xs font-bold transition-all text-center cursor-pointer ${
-                mode === 'create'
+              className={`flex-1 py-2 rounded-full text-xs font-bold transition-all text-center cursor-pointer ${mode === 'create'
                   ? 'bg-surface-container-lowest text-primary shadow-xs'
                   : 'text-on-surface-variant hover:text-on-surface'
-              }`}
+                }`}
             >
               Create Account
             </button>
@@ -180,11 +179,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
               type="button"
               id="tab-login"
               onClick={() => toggleAuthMode('login')}
-              className={`flex-1 py-2 rounded-full text-xs font-bold transition-all text-center cursor-pointer ${
-                mode === 'login'
+              className={`flex-1 py-2 rounded-full text-xs font-bold transition-all text-center cursor-pointer ${mode === 'login'
                   ? 'bg-surface-container-lowest text-primary shadow-xs'
                   : 'text-on-surface-variant hover:text-on-surface'
-              }`}
+                }`}
             >
               Log In
             </button>

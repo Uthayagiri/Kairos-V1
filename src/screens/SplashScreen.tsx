@@ -294,9 +294,8 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
     <div
       ref={portalRef}
       onClick={handleInteraction}
-      className={`bg-background text-on-surface font-body-md h-full w-full flex flex-col pt-safe pb-safe selection:bg-primary-fixed selection:text-on-primary-fixed antialiased select-none relative overflow-hidden transition-all duration-300 ${
-        isExiting ? 'animate-fade-out opacity-0 scale-105' : 'animate-fade-in opacity-100'
-      }`}
+      className={`bg-background text-on-surface font-body-md h-full w-full flex flex-col pt-safe pb-safe selection:bg-primary-fixed selection:text-on-primary-fixed antialiased select-none relative overflow-hidden transition-all duration-300 ${isExiting ? 'animate-fade-out opacity-0 scale-105' : 'animate-fade-in opacity-100'
+        }`}
       role="region"
       aria-label="Kairos Splash Loading Screen"
     >

@@ -45,7 +45,7 @@ export const AppTopBar: React.FC<AppTopBarProps> = ({
 }) => {
   const triggerHaptic = (style: ImpactStyle = ImpactStyle.Light) => {
     try {
-      Haptics.impact({ style }).catch(() => {});
+      Haptics.impact({ style }).catch(() => { });
     } catch {
       // fallback
     }

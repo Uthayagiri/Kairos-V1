@@ -13,6 +13,16 @@ function getEnvBaseUrl(): string {
       return String(metaEnv.VITE_API_BASE_URL).replace(/\/+$/, '');
     }
   } catch {}
+
+  // In browser environments on remote production domains (e.g. Cloudflare / HTTPS),
+  // default to current origin rather than dead localhost:5000
+  if (typeof window !== 'undefined' && window.location && window.location.origin) {
+    const host = window.location.hostname;
+    if (host && host !== 'localhost' && host !== '127.0.0.1') {
+      return window.location.origin.replace(/\/+$/, '');
+    }
+  }
+
   return 'http://localhost:5000';
 }
 
