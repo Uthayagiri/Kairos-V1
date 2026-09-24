@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { Achievement } from '../types/achievement.types';
 import { ACHIEVEMENT_RARITIES } from '../data/rarities';
-import { getProgressPercentage } from '../utils/achievementHelpers';
-import { GlowController } from './GlowController';
-import { AchievementModel } from './AchievementModel';
+import { getProgressPercentage, calculateAchievementXpReward } from '../utils/achievementHelpers';
+import { progressionManager } from '../../progression/services/progressionManager';
+import { CardBadgePreview } from './CardBadgePreview';
 
 export interface AchievementCardProps {
   achievement: Achievement;
@@ -21,12 +21,14 @@ export const AchievementCard: React.FC<AchievementCardProps> = ({
   const rarityMeta = ACHIEVEMENT_RARITIES[achievement.rarity] || ACHIEVEMENT_RARITIES.common;
   const isUnlocked = achievement.unlocked || achievement.isUnlocked || false;
   const progressPct = getProgressPercentage(achievement);
+  const currentLevel = progressionManager.getState().level;
+  const xpReward = calculateAchievementXpReward(achievement.rarity, currentLevel);
 
   const glowStageLabels = {
     LOCKED: 'Locked',
     DISCOVERED: 'Discovered',
     IN_PROGRESS: 'In Progress',
-    NEAR_COMPLETION: 'Near Completion',
+    NEAR_COMPLETION: 'Near Done',
     UNLOCKED: 'Unlocked'
   };
 
@@ -43,119 +45,83 @@ export const AchievementCard: React.FC<AchievementCardProps> = ({
       onClick={() => onSelect(achievement)}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className={`group relative rounded-3xl border transition-all duration-300 cursor-pointer overflow-hidden p-4 sm:p-5 flex flex-col justify-between ${
+      className={`group relative rounded-2xl border transition-all duration-200 cursor-pointer overflow-hidden p-2.5 flex flex-col justify-between ${
         isUnlocked
-          ? 'bg-white border-slate-200/90 shadow-sm hover:shadow-[0_16px_36px_-6px_rgba(79,70,229,0.15)] hover:border-primary/40 hover:-translate-y-1'
+          ? 'bg-surface-container-lowest border-surface-container-high/60 shadow-xs hover:shadow-md hover:border-primary/40 active:scale-[0.98]'
           : achievement.currentProgress > 0
-          ? 'bg-white/90 border-slate-200 shadow-xs hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5'
-          : 'bg-slate-50/70 border-dashed border-slate-200/90 opacity-80 hover:opacity-100 hover:bg-white hover:border-slate-300'
+          ? 'bg-surface-container-lowest/90 border-surface-container-high/50 shadow-2xs hover:border-primary/30 active:scale-[0.98]'
+          : 'bg-surface-container-low/50 border-dashed border-surface-container-high/40 opacity-80 hover:opacity-100'
       } ${className}`}
     >
       {/* Background Soft Ambient Light */}
       {(isUnlocked || achievement.currentProgress > 0) && (
         <div
-          className="absolute -top-10 -right-10 w-36 h-36 rounded-full blur-3xl opacity-15 pointer-events-none transition-opacity duration-300 group-hover:opacity-30"
+          className="absolute -top-6 -right-6 w-24 h-24 rounded-full blur-2xl opacity-15 pointer-events-none transition-opacity duration-300 group-hover:opacity-25"
           style={{ backgroundColor: achievement.glowColor }}
         />
       )}
 
       {/* Top Header Row: Rarity Pill & Rewards */}
-      <div className="flex items-center justify-between mb-3 z-10 gap-1.5 flex-wrap">
-        <div className="flex items-center gap-1.5">
-          <span
-            className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${rarityMeta.bgClass}`}
-          >
-            {rarityMeta.label}
-          </span>
-          <span
-            className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${
-              glowStageColors[achievement.glowStage || (isUnlocked ? 'UNLOCKED' : 'LOCKED')]
-            }`}
-          >
-            {glowStageLabels[achievement.glowStage || (isUnlocked ? 'UNLOCKED' : 'LOCKED')]}
-          </span>
-        </div>
+      <div className="flex items-center justify-between mb-1.5 z-10 gap-1 min-w-0">
+        <span
+          className={`px-1.5 py-0.5 rounded-full text-[7.5px] font-black uppercase tracking-wider shrink-0 ${rarityMeta.bgClass}`}
+        >
+          {rarityMeta.label}
+        </span>
 
-        {/* XP & HP Badges */}
-        <div className="flex items-center gap-1">
-          {achievement.rewardXP > 0 && (
-            <span className="flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-200/80 text-indigo-700 text-[10px] font-black font-mono shadow-2xs">
-              <span>+{achievement.rewardXP}</span>
-              <span className="text-[9px]">XP</span>
-            </span>
-          )}
-          {achievement.rewardHP > 0 && (
-            <span className="flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200/80 text-amber-700 text-[10px] font-black font-mono shadow-2xs">
-              <span className="material-symbols-outlined text-[11px]">bolt</span>
-              <span>+{achievement.rewardHP}</span>
-            </span>
-          )}
+        {/* XP Badge (XP only, NO HP) */}
+        <div className="flex items-center gap-1 shrink-0">
+          <span className="flex items-center gap-0.5 px-1 py-0.5 rounded bg-primary-fixed/40 text-primary text-[8px] font-bold font-mono">
+            <span>+{xpReward}</span>
+            <span className="text-[6.5px]">XP</span>
+          </span>
         </div>
       </div>
 
-      {/* Center 3D Preview / Badge */}
-      <div className="my-1 relative flex items-center justify-center h-28 w-full">
-        {isUnlocked || achievement.currentProgress > 0 ? (
-          <GlowController
-            baseColor={achievement.glowColor}
-            rarity={achievement.rarity}
-            currentProgress={achievement.currentProgress}
-            targetProgress={achievement.targetProgress}
-            isUnlocked={isUnlocked}
-            isHovered={isHovered}
-            className="w-24 h-24 flex items-center justify-center"
-          >
-            <AchievementModel
-              type={achievement.modelType}
-              rarity={achievement.rarity}
-              glowColor={achievement.glowColor}
-              currentProgress={achievement.currentProgress}
-              targetProgress={achievement.targetProgress}
-              isUnlocked={isUnlocked}
-              autoRotate={true}
-              scale={0.95}
-              className="w-24 h-24"
-            />
-          </GlowController>
-        ) : (
-          <div className="w-20 h-20 rounded-2xl bg-slate-100 border border-slate-200/80 flex items-center justify-center shadow-inner group-hover:scale-105 transition-transform duration-300">
-            <span className="material-symbols-outlined text-4xl text-slate-400">
-              {achievement.icon || 'lock'}
-            </span>
-          </div>
-        )}
+      {/* Center 3D Collectible Medal Preview */}
+      <div className="my-0.5 relative flex items-center justify-center h-20 w-full">
+        <CardBadgePreview
+          id={achievement.id}
+          name={achievement.name || achievement.title || 'Achievement'}
+          rarity={achievement.rarity}
+          modelType={achievement.modelType}
+          category={achievement.category}
+          glowColor={achievement.glowColor}
+          currentProgress={achievement.currentProgress}
+          targetProgress={achievement.targetProgress}
+          unlocked={isUnlocked}
+          className="w-full h-full"
+        />
       </div>
 
       {/* Achievement Info */}
       <div className="z-10 mt-1">
-        <h4 className="text-sm sm:text-base font-black text-slate-900 group-hover:text-primary transition-colors flex items-center gap-1.5 line-clamp-1">
+        <h4 className="text-xs font-bold text-on-surface group-hover:text-primary transition-colors flex items-center gap-1 line-clamp-1">
           {achievement.name || achievement.title}
         </h4>
-        <p className="text-xs text-slate-600 line-clamp-2 mt-1 leading-relaxed">
+        <p className="text-[10px] text-on-surface-variant line-clamp-2 mt-0.5 leading-snug">
           {achievement.description}
         </p>
       </div>
 
       {/* Progress Footer */}
-      <div className="mt-4 pt-3 border-t border-slate-100 z-10">
-        <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500 mb-1.5">
-          <span>
-            {isUnlocked
-              ? `Completed (${achievement.unlockDate || 'Active'})`
-              : 'Target Progress'}
+      <div className="mt-2 pt-1.5 border-t border-surface-container-high/30 z-10">
+        <div className="flex items-center justify-between text-[8.5px] font-semibold text-on-surface-variant mb-1">
+          <span className="truncate max-w-[70px]">
+            {isUnlocked ? 'Unlocked' : 'Progress'}
           </span>
-          <span className="font-mono text-slate-800 font-bold">
-            {achievement.currentProgress} / {achievement.targetProgress} {achievement.unit}
+          <span className="font-mono text-on-surface font-bold text-[9px]">
+            {achievement.currentProgress}/{achievement.targetProgress} {achievement.unit}
           </span>
         </div>
 
         {/* Progress Track */}
-        <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden relative">
+        <div className="w-full h-1 rounded-full bg-surface-container-high overflow-hidden relative">
           <div
             className={`h-full rounded-full transition-all duration-700 ease-out ${
               isUnlocked
-                ? 'bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]'
-                : 'bg-gradient-to-r from-primary via-indigo-500 to-amber-500'
+                ? 'bg-gradient-to-r from-emerald-500 to-teal-400 shadow-sm'
+                : 'bg-gradient-to-r from-primary via-indigo-500 to-secondary'
             }`}
             style={{ width: `${progressPct}%` }}
           />

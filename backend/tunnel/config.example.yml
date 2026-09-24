@@ -1,0 +1,17 @@
+# Cloudflare Tunnel Configuration Example (Phase E.7)
+# Location: ~/.cloudflared/config.yml or E:\Kairos\backend\tunnel\config.yml
+
+# Replace with your actual Tunnel UUID from `cloudflared tunnel create kairos-tunnel`
+tunnel: 00000000-0000-0000-0000-000000000000
+credentials-file: ~/.cloudflared/00000000-0000-0000-0000-000000000000.json
+
+ingress:
+  # Route public HTTPS API requests directly to local Fastify backend port 5000
+  - hostname: api.yourdomain.com
+    service: http://localhost:5000
+    originRequest:
+      connectTimeout: 30s
+      noTLSVerify: false
+
+  # Catch-all rule for unmatched subdomains (returns 404)
+  - service: http_status:404

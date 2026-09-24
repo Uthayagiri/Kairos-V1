@@ -1,9 +1,52 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { BottomNavBar } from '../components/BottomNavBar';
+import { AppTopBar } from '../components/AppTopBar';
+import {
+  useProgression,
+  computeTaskStatusForDate,
+  useTaskTimingSettings,
+  loadUserCustomTasks,
+  saveUserCustomTasks,
+  EVENT_CUSTOM_TASKS_UPDATED,
+  EVENT_TASK_TIMINGS_UPDATED,
+  recordFocusSession,
+  calculateSessionDurationMinutes
+} from '../features/progression';
+import { squadService } from '../features/squad';
+import { checkTaskTimeWindow, formatDisplayTime, TaskItem, INITIAL_TASKS, formatDateToISO, isTaskScheduledForDate } from './TasksScreen';
+import { syncQueue, syncSerializer } from '../features/sync';
+
+export interface PinnedReminder {
+  id?: string;
+  title: string;
+  desc: string;
+  time: string;
+  dismissed?: boolean;
+  createdAt?: string;
+}
+
+export interface DailyReflection {
+  id: string;
+  text: string;
+  date: string;
+  createdAt: string;
+}
+
+import {
+  STORAGE_DOMAINS,
+  getUserScopedJSON,
+  setUserScopedJSON,
+  removeUserScopedItem
+} from '../features/storage';
+
+export const STORAGE_KEY_PINNED_REMINDER = 'KAIROS_PINNED_REMINDER_V1';
+export const STORAGE_KEY_DAILY_REFLECTIONS = 'KAIROS_DAILY_REFLECTIONS_V1';
 
 interface HomeScreenProps {
   userProfile?: { email: string; name: string } | null;
   onNavigateTab?: (tab: string) => void;
+  onOpenNotifications?: () => void;
 }
 
 interface CircadianProfile {
@@ -31,7 +74,7 @@ const CIRCADIAN_PROFILES: Record<string, CircadianProfile> = {
     iconBoxClass: 'bg-amber-100 text-amber-700',
     borderGlowClass: 'border-amber-200/80',
     greeting: 'Good morning',
-    subtitle: 'Your circadian cadence is locked in for high-clarity morning flow.',
+    subtitle: 'Your daily rhythm is locked in for high-clarity morning flow.',
     orb1: 'bg-amber-300/60',
     orb2: 'bg-orange-200/50',
     pulseColor: 'bg-amber-500',
@@ -76,7 +119,7 @@ const CIRCADIAN_PROFILES: Record<string, CircadianProfile> = {
     iconBoxClass: 'bg-indigo-950 text-indigo-300',
     borderGlowClass: 'border-indigo-800/60',
     greeting: 'Good night',
-    subtitle: 'Celestial cadence active. Screen dimmed for melatonin restoration.',
+    subtitle: 'Night recovery rhythm active. Screen dimmed for melatonin restoration.',
     orb1: 'bg-indigo-900/80',
     orb2: 'bg-violet-900/60',
     pulseColor: 'bg-indigo-400',
@@ -85,64 +128,250 @@ const CIRCADIAN_PROFILES: Record<string, CircadianProfile> = {
   }
 };
 
-export const HomeScreen: React.FC<HomeScreenProps> = ({ userProfile, onNavigateTab }) => {
+export const HomeScreen: React.FC<HomeScreenProps> = ({
+  userProfile,
+  onNavigateTab,
+  onOpenNotifications
+}) => {
+  const progression = useProgression();
+  const { settings: timingSettings } = useTaskTimingSettings();
   const [activeTab, setActiveTab] = useState<string>('home');
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const [sessionKey, setSessionKey] = useState<string>('afternoon');
 
-  // Momentum & Task State
-  const [momentum, setMomentum] = useState(68);
-  const [hp, setHp] = useState(140);
-  const [tasksDone, setTasksDone] = useState(5);
-  const [tasksRemaining, setTasksRemaining] = useState(3);
-  const [taskCompleted, setTaskCompleted] = useState(false);
-  const [timerSeconds, setTimerSeconds] = useState(2658); // 44:18
+  const todayStr = useMemo(() => formatDateToISO(currentTime), [currentTime]);
 
-  // Reminders State
+  // Load custom tasks from localStorage (strictly user-created custom missions)
+  const [customTasks, setCustomTasks] = useState<TaskItem[]>(() => loadUserCustomTasks<TaskItem>());
+
+  // Real-time synchronization across all tabs and screens
+  useEffect(() => {
+    const handleSync = () => {
+      setCustomTasks(loadUserCustomTasks<TaskItem>());
+    };
+    window.addEventListener(EVENT_CUSTOM_TASKS_UPDATED, handleSync);
+    window.addEventListener(EVENT_TASK_TIMINGS_UPDATED, handleSync);
+    window.addEventListener('storage', handleSync);
+    return () => {
+      window.removeEventListener(EVENT_CUSTOM_TASKS_UPDATED, handleSync);
+      window.removeEventListener(EVENT_TASK_TIMINGS_UPDATED, handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
+  }, []);
+
+  // Convert unlocked default tasks into TaskItem objects strictly for TODAY
+  const defaultTaskItems = useMemo<TaskItem[]>(() => {
+    return progression.unlockedDefaultTasks.map((dt) => {
+      const isCompleted = progression.isTaskCompletedToday(dt.id);
+      const override = timingSettings.taskOverrides[dt.id];
+      const startTime = override?.startTime || dt.startTime || '08:00';
+      const endTime = override?.endTime || dt.endTime || '20:00';
+      const status = computeTaskStatusForDate(
+        {
+          id: dt.id,
+          startDate: todayStr,
+          startTime,
+          endDate: todayStr,
+          endTime,
+          schedule: dt.schedule || 'Weekly Repeat'
+        },
+        todayStr,
+        todayStr,
+        isCompleted
+      );
+
+      return {
+        id: dt.id,
+        title: dt.title,
+        description: dt.description,
+        category: dt.category,
+        status,
+        priority: dt.priority,
+        hp: dt.hp,
+        startDate: todayStr,
+        startTime,
+        endDate: todayStr,
+        endTime,
+        schedule: dt.schedule,
+        createdAt: 'System Routine',
+        completedAt: isCompleted ? 'Today' : null
+      };
+    });
+  }, [progression.unlockedDefaultTasks, progression.completedTaskIdsToday, todayStr, timingSettings]);
+
+  // STRICTLY filter custom tasks scheduled for TODAY (including Daily, Weekly, and Monthly recurrences)
+  const todaysCustomTasks = useMemo<TaskItem[]>(() => {
+    return customTasks
+      .filter((t) => t && typeof t.id === 'string' && t.id.startsWith('custom-') && isTaskScheduledForDate(t, todayStr))
+      .map((t) => {
+        const isRepeating = Boolean(
+          t.schedule && (
+            t.schedule.toLowerCase().includes('repeat') ||
+            t.schedule.toLowerCase().includes('daily') ||
+            t.schedule.toLowerCase().includes('routine') ||
+            t.schedule.toLowerCase().includes('weekly') ||
+            t.schedule.toLowerCase().includes('monthly')
+          )
+        );
+        const isCompleted = isRepeating
+          ? progression.isTaskCompletedToday(t.id)
+          : (progression.isTaskCompletedToday(t.id) || t.status === 'completed');
+        const status = computeTaskStatusForDate(
+          t,
+          todayStr,
+          todayStr,
+          isCompleted
+        );
+        return {
+          ...t,
+          status,
+          completedAt: isCompleted ? t.completedAt || 'Today' : null
+        };
+      });
+  }, [customTasks, todayStr, progression.completedTaskIdsToday]);
+
+  // Combined tasks STRICTLY FOR TODAY
+  const todaysTasks: TaskItem[] = useMemo(() => {
+    return [...defaultTaskItems, ...todaysCustomTasks];
+  }, [defaultTaskItems, todaysCustomTasks]);
+
+  // Momentum & Task State derived strictly from TODAY's completions & capacity
+  const hp = progression.todayHP;
+  const momentum = Math.min(100, Math.round((progression.todayHP / progression.dailyHpThreshold) * 100));
+
+  const tasksDone = useMemo(() => {
+    return todaysTasks.filter((t) => progression.isTaskCompletedToday(t.id) || t.status === 'completed').length;
+  }, [todaysTasks, progression.completedTaskIdsToday]);
+
+  const tasksRemaining = useMemo(() => {
+    return todaysTasks.filter((t) => !progression.isTaskCompletedToday(t.id) && t.status === 'pending').length;
+  }, [todaysTasks, progression.completedTaskIdsToday]);
+
+  // Active tasks: Find all uncompleted tasks for TODAY that are currently within their scheduled time window
+  const activeTasks = useMemo(() => {
+    return todaysTasks.filter((t) => {
+      if (progression.isTaskCompletedToday(t.id) || t.status === 'completed') return false;
+      const tw = checkTaskTimeWindow(t.startTime, t.endTime);
+      return tw.isWithinWindow;
+    });
+  }, [todaysTasks, progression.completedTaskIdsToday, currentTime]);
+
+  // Next upcoming task today if no task is active right now
+  const nextUpcomingTask = useMemo(() => {
+    if (activeTasks.length > 0) return null;
+    const upcoming = todaysTasks
+      .filter(
+        (t) =>
+          !progression.isTaskCompletedToday(t.id) &&
+          t.status !== 'completed' &&
+          checkTaskTimeWindow(t.startTime, t.endTime).isUpcoming
+      )
+      .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+    return upcoming[0] || null;
+  }, [todaysTasks, activeTasks.length, progression.completedTaskIdsToday, currentTime]);
+
+  // 1-second ticker for active task countdowns
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setClockTick((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const calculateTaskRemainingSeconds = (startTimeStr?: string, endTimeStr?: string) => {
+    if (!endTimeStr) return 0;
+    const now = new Date();
+    const [endH, endM] = endTimeStr.split(':').map((v) => parseInt(v, 10) || 0);
+    const end = new Date(now);
+    end.setHours(endH, endM, 0, 0);
+
+    const [startH, startM] = (startTimeStr || '00:00').split(':').map((v) => parseInt(v, 10) || 0);
+    const isCrossMidnight = endH < startH || (endH === startH && endM < startM);
+
+    if (isCrossMidnight && now.getHours() >= startH) {
+      end.setDate(end.getDate() + 1);
+    }
+    return Math.max(0, Math.floor((end.getTime() - now.getTime()) / 1000));
+  };
+
+  // Reminders State (persisted to user-scoped storage)
   const [reminderInput, setReminderInput] = useState('');
-  const [pinnedReminder, setPinnedReminder] = useState({
-    title: 'Pick up study materials before 6 PM',
-    desc: 'Campus bookstore closes early for inventory check.',
-    time: 'Before 6:00 PM',
-    dismissed: false
+  const [pinnedReminder, setPinnedReminder] = useState<PinnedReminder | null>(() => {
+    try {
+      const parsed = getUserScopedJSON<PinnedReminder | null>(STORAGE_DOMAINS.PINNED_REMINDER, null, userProfile);
+      if (parsed && typeof parsed.title === 'string' && !parsed.dismissed) {
+        return parsed;
+      }
+    } catch {}
+    return null;
   });
 
-  // Daily Rituals State
-  const [rituals, setRituals] = useState([
-    {
-      id: 1,
-      title: 'Morning Wake-up & Sunlight',
-      desc: 'Completed at 7:15 AM',
-      icon: 'done',
-      status: 'Done'
-    },
-    {
-      id: 2,
-      title: 'Hydration Target 1.5L',
-      desc: '1.1L / 1.5L logged today',
-      icon: 'water_drop',
-      status: 'In Progress'
-    },
-    {
-      id: 3,
-      title: 'Afternoon Reset Walk',
-      desc: 'Target 20 mins post-lunch',
-      icon: 'directions_walk',
-      status: 'Pending'
-    }
-  ]);
-
-  // Reflection State
+  // Reflections State (persisted to user-scoped storage)
+  const [reflections, setReflections] = useState<DailyReflection[]>(() => {
+    try {
+      const parsed = getUserScopedJSON<DailyReflection[]>(STORAGE_DOMAINS.DAILY_REFLECTIONS, [], userProfile);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((r) => r && typeof r.text === 'string');
+      }
+    } catch {}
+    return [];
+  });
   const [reflectionText, setReflectionText] = useState('');
   const [logStatusMsg, setLogStatusMsg] = useState<string | null>(null);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const toastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const userName = userProfile?.name || 'Alex';
-
-  // Real-time clock & Circadian calculator
+  // Synchronize reminders and reflections when active user changes
   useEffect(() => {
-    const updateCircadian = () => {
+    try {
+      const parsedReminder = getUserScopedJSON<PinnedReminder | null>(
+        STORAGE_DOMAINS.PINNED_REMINDER,
+        null,
+        userProfile
+      );
+      setPinnedReminder(
+        parsedReminder && typeof parsedReminder.title === 'string' && !parsedReminder.dismissed
+          ? parsedReminder
+          : null
+      );
+
+      const parsedReflections = getUserScopedJSON<DailyReflection[]>(
+        STORAGE_DOMAINS.DAILY_REFLECTIONS,
+        [],
+        userProfile
+      );
+      setReflections(
+        Array.isArray(parsedReflections)
+          ? parsedReflections.filter((r) => r && typeof r.text === 'string')
+          : []
+      );
+    } catch {}
+  }, [userProfile]);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
+  const showToast = (msg: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToastMsg(msg);
+    toastTimerRef.current = setTimeout(() => {
+      setToastMsg((prev) => (prev === msg ? null : prev));
+      toastTimerRef.current = null;
+    }, 2400);
+  };
+
+  const userName = userProfile?.name || 'Voyager';
+
+  // Real-time clock, Circadian calculator & Midnight Rollover Watcher
+  useEffect(() => {
+    const updateCircadianAndCheckMidnight = () => {
       const now = new Date();
       setCurrentTime(now);
+      progression.checkDailyRollover();
       const hour = now.getHours();
       if (hour >= 5 && hour < 12) setSessionKey('morning');
       else if (hour >= 12 && hour < 17) setSessionKey('afternoon');
@@ -150,19 +379,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userProfile, onNavigateT
       else setSessionKey('night');
     };
 
-    updateCircadian();
-    const interval = setInterval(updateCircadian, 30000);
+    updateCircadianAndCheckMidnight();
+    const interval = setInterval(updateCircadianAndCheckMidnight, 5000);
     return () => clearInterval(interval);
-  }, []);
-
-  // Timer countdown
-  useEffect(() => {
-    if (taskCompleted || timerSeconds <= 0) return;
-    const t = setInterval(() => {
-      setTimerSeconds((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-    return () => clearInterval(t);
-  }, [taskCompleted, timerSeconds]);
+  }, [progression]);
 
   const triggerHaptic = (style: ImpactStyle = ImpactStyle.Light) => {
     try {
@@ -183,27 +403,100 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userProfile, onNavigateT
       .padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleCompleteTask = () => {
-    triggerHaptic(ImpactStyle.Medium);
-    if (!taskCompleted) {
-      setTaskCompleted(true);
-      setMomentum((prev) => Math.min(prev + 12, 100));
-      setHp((prev) => prev + 45);
-      setTasksDone((prev) => prev + 1);
-      setTasksRemaining((prev) => Math.max(prev - 1, 0));
+  const handleCompleteActiveTask = (task: TaskItem) => {
+    // Strictly enforce scheduled time window check
+    const timeWindow = checkTaskTimeWindow(task.startTime, task.endTime);
+    if (!timeWindow.isWithinWindow) {
+      triggerHaptic(ImpactStyle.Medium);
+      if (timeWindow.isUpcoming) {
+        showToast(`🔒 Scheduled for ${timeWindow.formattedRange}. You can only complete this task during its scheduled window.`);
+      } else {
+        showToast(`⏰ Scheduled window closed (${timeWindow.formattedRange}). Tasks can only be completed during their scheduled time.`);
+      }
+      return;
+    }
+
+    triggerHaptic(ImpactStyle.Heavy);
+    const res = progression.completeTask({
+      id: task.id,
+      hp: task.hp,
+      title: task.title
+    });
+
+    if (res.didLevelUp) {
+      showToast(`🎉 Level Up! You reached Level ${res.newLevel}: ${progression.levelTitle}! +${res.hpAwarded} HP (+${res.xpAwarded} XP)`);
+    } else {
+      showToast(`+${res.hpAwarded} HP (+${res.xpAwarded} XP) Claimed! Mission Completed.`);
+    }
+
+    // Record eligible Squad challenge contribution independently (0 additional XP/HP)
+    if (res.success) {
+      try {
+        squadService.recordTaskContribution({
+          id: task.id,
+          title: task.title,
+          category: task.category,
+          startTime: task.startTime,
+          endTime: task.endTime,
+          date: formatDateToISO(new Date())
+        });
+      } catch {}
+    }
+
+    // Record FocusSession if this is a deep work or focus task
+    if (
+      res.success &&
+      (['Deep Work', 'Study', 'Intellect', 'Skill', 'Productivity'].includes(task.category) ||
+        /focus|deep work|pomodoro/i.test(task.title))
+    ) {
+      const dur = calculateSessionDurationMinutes(task.startTime, task.endTime);
+      if (dur > 0) {
+        recordFocusSession({
+          id: `task_focus_${task.id}_${formatDateToISO(new Date())}`,
+          startTime: task.startTime || '09:00',
+          endTime: task.endTime || '10:00',
+          durationMinutes: dur,
+          completed: true,
+          date: formatDateToISO(new Date()),
+          title: task.title,
+          category: task.category
+        });
+      }
+    }
+
+    // Also persist completion to custom tasks if custom
+    if (customTasks.some((t) => t.id === task.id)) {
+      const updated = customTasks.map((t) =>
+        t.id === task.id
+          ? {
+              ...t,
+              status: 'completed' as const,
+              completedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            }
+          : t
+      );
+      setCustomTasks(updated);
+      saveUserCustomTasks(updated);
     }
   };
 
   const handleAddReminder = () => {
     if (!reminderInput.trim()) return;
     triggerHaptic(ImpactStyle.Medium);
-    setPinnedReminder({
-      title: reminderInput,
+    const newReminder: PinnedReminder = {
+      id: `reminder-${Date.now()}`,
+      title: reminderInput.trim(),
       desc: 'Pinned from Quick Notes.',
       time: 'Today',
-      dismissed: false
-    });
+      dismissed: false,
+      createdAt: new Date().toISOString()
+    };
+    setPinnedReminder(newReminder);
+    try {
+      setUserScopedJSON(STORAGE_DOMAINS.PINNED_REMINDER, newReminder, userProfile);
+    } catch {}
     setReminderInput('');
+    showToast('Reminder pinned!');
   };
 
   const handleSimulateVoice = () => {
@@ -213,26 +506,35 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userProfile, onNavigateT
 
   const handleDismissReminder = () => {
     triggerHaptic(ImpactStyle.Light);
-    setPinnedReminder((prev) => ({ ...prev, dismissed: true }));
-  };
-
-  const toggleRitual = (id: number) => {
-    triggerHaptic(ImpactStyle.Light);
-    setRituals((prev) =>
-      prev.map((r) => {
-        if (r.id === id) {
-          const nextStatus = r.status === 'Done' ? 'Pending' : r.status === 'Pending' ? 'In Progress' : 'Done';
-          return { ...r, status: nextStatus };
-        }
-        return r;
-      })
-    );
+    setPinnedReminder(null);
+    try {
+      removeUserScopedItem(STORAGE_DOMAINS.PINNED_REMINDER, userProfile);
+    } catch {}
+    showToast('Reminder dismissed');
   };
 
   const handleSaveReflection = () => {
     if (!reflectionText.trim()) return;
     triggerHaptic(ImpactStyle.Medium);
-    setLogStatusMsg('Reflections synced to Kairos Cadence!');
+    const newRecord: DailyReflection = {
+      id: `ref_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      text: reflectionText.trim(),
+      date: todayStr,
+      createdAt: new Date().toISOString()
+    };
+    const updated = [newRecord, ...reflections];
+    setReflections(updated);
+    try {
+      setUserScopedJSON(STORAGE_DOMAINS.DAILY_REFLECTIONS, updated, userProfile);
+      syncQueue.enqueue(
+        'DAILY_REFLECTION_UPSERTED',
+        syncSerializer.dailyReflectionUpserted({
+          date: todayStr,
+          journalText: newRecord.text
+        })
+      );
+    } catch {}
+    setLogStatusMsg('Reflections synced to your Daily Flow!');
     setTimeout(() => {
       setLogStatusMsg(null);
       setReflectionText('');
@@ -259,41 +561,31 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userProfile, onNavigateT
 
   return (
     <div className="w-full h-full flex flex-col bg-surface overflow-hidden relative selection:bg-primary-fixed selection:text-on-primary-fixed antialiased animate-fade-in">
-      {/* Top Header App Bar */}
-      <header className="fixed top-0 inset-x-0 z-40 bg-surface/90 backdrop-blur-xl shadow-xs pt-safe border-b border-surface-container/60 transition-colors duration-400">
-        <div className="h-14 px-5 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div
-              className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#38bdf8] via-[#818cf8] to-[#ec4899] flex items-center justify-center shrink-0 shadow-md shadow-indigo-500/20"
-            >
-              <span className="text-white font-bold text-sm tracking-tighter leading-none select-none font-serif">
-                K
-              </span>
-            </div>
-            <div className="flex flex-col">
-              <span className="font-headline-sm text-base tracking-tight text-on-surface font-bold leading-tight">
-                Kairos
-              </span>
-              <span className="text-[11px] text-on-surface-variant font-medium">Home</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => triggerHaptic(ImpactStyle.Light)}
-              className="relative w-9 h-9 flex items-center justify-center rounded-full text-on-surface-variant hover:text-on-surface bg-surface-container-low border border-outline-variant/40 active:scale-95 transition-all cursor-pointer"
-              aria-label="Notifications"
-              type="button"
-            >
-              <span className="material-symbols-outlined text-[20px]">notifications</span>
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-tertiary ring-2 ring-surface" />
-            </button>
-          </div>
-        </div>
-      </header>
+      {/* Top Header App Bar (Left: Splash Orb + Title/Subtitle; Right: Notifications icon only) */}
+      <AppTopBar
+        subtitle="Home Sanctuary"
+        rightAction={
+          <button
+            onClick={() => {
+              triggerHaptic(ImpactStyle.Light);
+              if (onOpenNotifications) {
+                onOpenNotifications();
+              } else if (onNavigateTab) {
+                onNavigateTab('notifications');
+              }
+            }}
+            className="relative w-9 h-9 flex items-center justify-center rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 bg-surface-container-low/70 active:scale-95 transition-all cursor-pointer border-none"
+            aria-label="Notifications"
+            type="button"
+          >
+            <span className="material-symbols-outlined text-[20px]">notifications</span>
+            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-tertiary ring-2 ring-surface animate-pulse" />
+          </button>
+        }
+      />
 
       {/* Main Scrollable Canvas Area */}
-      <main className="flex-1 overflow-y-auto overscroll-contain px-5 pt-16 pb-28 space-y-4 relative">
+      <main className="flex-1 overflow-y-auto overscroll-contain px-4 pt-3 pb-28 space-y-4 relative mobile-scroll">
         {/* Ambient Glow Orbs */}
         <div className="relative w-full overflow-hidden pointer-events-none -mb-4">
           <div
@@ -351,10 +643,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userProfile, onNavigateT
                 <span className="material-symbols-outlined text-xs" style={{ fontVariationSettings: "'FILL' 1" }}>
                   favorite
                 </span>
-                <span className="text-xs font-bold">+{hp} HP today</span>
+                <span className="text-xs font-bold">{progression.todayHP} / {progression.dailyHpThreshold} HP</span>
               </div>
               <span className="text-[11px] text-on-surface-variant mt-1 font-semibold">
-                Energy Peak: High
+                Daily Capacity: {progression.dailyHpThreshold} HP
               </span>
             </div>
           </div>
@@ -398,82 +690,130 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userProfile, onNavigateT
         </div>
 
         {/* Active Task Window */}
-        <div className="relative rounded-3xl p-4 bg-surface-container-lowest/95 backdrop-blur-xl shadow-xs flex flex-col gap-2.5 border border-surface-container-highest/60">
+        <div className="relative rounded-3xl p-4 bg-surface-container-lowest/95 backdrop-blur-xl shadow-xs flex flex-col gap-3 border border-surface-container-highest/60">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined text-primary text-xl">play_circle</span>
+              <span className={`material-symbols-outlined text-xl ${activeTasks.length > 0 ? 'text-primary' : 'text-on-surface-variant'}`}>
+                {activeTasks.length > 0 ? 'play_circle' : 'schedule'}
+              </span>
               <h2 className="text-base text-on-surface font-bold">Active Task Window</h2>
             </div>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-bold border border-primary/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-ping" /> Live Now
-            </span>
+            {activeTasks.length > 0 ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-bold border border-primary/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-ping" /> {activeTasks.length === 1 ? 'Live Now' : `${activeTasks.length} Active Now`}
+              </span>
+            ) : nextUpcomingTask ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant text-xs font-semibold border border-surface-container-highest/60">
+                <span className="material-symbols-outlined text-xs">schedule</span> Next at {formatDisplayTime(nextUpcomingTask.startTime)}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-container-high text-primary text-xs font-semibold border border-primary/20">
+                <span className="material-symbols-outlined text-xs">check_circle</span> All Synced
+              </span>
+            )}
           </div>
 
-          {/* Featured Sole Active Focus Task */}
-          <div className="relative p-3.5 rounded-2xl bg-gradient-to-br from-primary-fixed/30 via-surface-container-low to-surface-container-high/60 border border-primary/20 shadow-xs flex flex-col gap-2.5">
-            <div className="flex items-start justify-between gap-2">
-              <div className="space-y-1">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-xs text-primary font-bold px-2.5 py-0.5 rounded-full bg-primary-container/10">
-                    11:00 AM – 12:30 PM
-                  </span>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-tertiary-fixed text-on-tertiary-fixed-variant text-[11px] font-bold">
-                    {taskCompleted ? 'Completed' : 'In Progress • High Priority'}
-                  </span>
-                </div>
-                <h3 className="text-base text-on-surface font-bold pt-0.5">
-                  Deep Study: Distributed Systems
-                </h3>
-                <p className="text-xs text-on-surface-variant leading-relaxed">
-                  Raft Consensus Algorithm review &amp; node cluster diagrams.
-                </p>
-              </div>
+          {activeTasks.length > 0 ? (
+            /* Display one below the other */
+            <div className="flex flex-col gap-3">
+              {activeTasks.map((task) => {
+                const secs = calculateTaskRemainingSeconds(task.startTime, task.endTime);
+                return (
+                  <div
+                    key={task.id}
+                    className="relative p-3.5 rounded-2xl bg-gradient-to-br from-primary-fixed/30 via-surface-container-low to-surface-container-high/60 border border-primary/20 shadow-xs flex flex-col gap-2.5 animate-fade-in"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs text-primary font-bold px-2.5 py-0.5 rounded-full bg-primary-container/10">
+                            {formatDisplayTime(task.startTime)} – {formatDisplayTime(task.endTime)}
+                          </span>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-tertiary-fixed text-on-tertiary-fixed-variant text-[11px] font-bold">
+                            In Progress • {task.priority} Priority
+                          </span>
+                        </div>
+                        <h3 className="text-base text-on-surface font-bold pt-0.5">
+                          {task.title}
+                        </h3>
+                        {task.description && (
+                          <p className="text-xs text-on-surface-variant leading-relaxed">
+                            {task.description}
+                          </p>
+                        )}
+                      </div>
 
-              <div className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary-container text-on-primary text-xs font-bold shadow-xs">
-                <span className="material-symbols-outlined text-xs" style={{ fontVariationSettings: "'FILL' 1" }}>
-                  star
-                </span>
-                +45 HP
-              </div>
+                      <div className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary-container text-on-primary text-xs font-bold shadow-xs">
+                        <span className="material-symbols-outlined text-xs" style={{ fontVariationSettings: "'FILL' 1" }}>
+                          star
+                        </span>
+                        +{task.hp} HP
+                      </div>
+                    </div>
+
+                    {/* Active Timer Countdown Bar */}
+                    <div className="p-2.5 rounded-xl bg-surface-container-lowest/90 border border-surface-container-high flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-primary text-lg">timer</span>
+                        <div>
+                          <span className="text-[10px] uppercase font-bold text-on-surface-variant block leading-none">
+                            Time Remaining
+                          </span>
+                          <span className="text-base font-extrabold text-on-surface tracking-tight leading-tight">
+                            {formatTimer(secs)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleCompleteActiveTask(task)}
+                        className="px-3.5 py-1.5 rounded-full text-xs font-bold transition-all shadow-xs cursor-pointer bg-primary text-on-primary hover:bg-primary-container active:scale-95"
+                        type="button"
+                      >
+                        Complete
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+                        <span className="text-xs text-on-surface-variant">
+                          {task.category} • {task.schedule || 'Daily Routine'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-
-            {/* Active Timer Countdown Bar */}
-            <div className="p-2.5 rounded-xl bg-surface-container-lowest/90 border border-surface-container-high flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-primary text-lg">timer</span>
-                <div>
-                  <span className="text-[10px] uppercase font-bold text-on-surface-variant block leading-none">
-                    Time Remaining
-                  </span>
-                  <span className="text-base font-extrabold text-on-surface tracking-tight leading-tight">
-                    {taskCompleted ? '00:00:00 (Done)' : formatTimer(timerSeconds)}
-                  </span>
-                </div>
+          ) : (
+            /* No Active Task State */
+            <div className="relative p-5 rounded-2xl bg-gradient-to-br from-surface-container-low via-surface-container-low/80 to-surface-container-high/40 border border-surface-container-highest/60 shadow-xs flex flex-col items-center text-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-surface-container-high/80 border border-surface-container-highest flex items-center justify-center text-on-surface-variant">
+                <span className="material-symbols-outlined text-2xl">
+                  {nextUpcomingTask ? 'schedule' : 'event_available'}
+                </span>
               </div>
+              <h3 className="text-sm text-on-surface font-bold">
+                No Active Task Scheduled
+              </h3>
 
               <button
-                onClick={handleCompleteTask}
-                disabled={taskCompleted}
-                className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all shadow-xs cursor-pointer ${
-                  taskCompleted
-                    ? 'bg-surface-container-high text-primary font-bold'
-                    : 'bg-primary text-on-primary hover:bg-primary-container active:scale-95'
-                }`}
+                onClick={() => {
+                  triggerHaptic(ImpactStyle.Light);
+                  if (onNavigateTab) {
+                    onNavigateTab('tasks');
+                  } else {
+                    handleTabClick('tasks');
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs font-bold transition-all border border-surface-container-highest/60 cursor-pointer shadow-2xs active:scale-95"
                 type="button"
               >
-                {taskCompleted ? 'Completed ✓' : 'Complete'}
+                <span className="material-symbols-outlined text-sm">checklist</span> View All Tasks
               </button>
             </div>
-
-            <div className="flex items-center justify-between pt-0.5">
-              <div className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary" />
-                <span className="text-xs text-on-surface-variant">
-                  Library Silent Floor B • Desk 14
-                </span>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
 
         {/* Remember This For Me */}
@@ -517,7 +857,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userProfile, onNavigateT
           </div>
 
           {/* Pinned Reminder Active Preview Card */}
-          {!pinnedReminder.dismissed && (
+          {pinnedReminder && !pinnedReminder.dismissed && (
             <div className="flex items-start gap-2.5 p-3 rounded-2xl bg-tertiary-fixed/70 border border-tertiary-fixed-dim text-on-tertiary-fixed transition-all animate-fade-in">
               <div className="w-7 h-7 rounded-full bg-tertiary-container text-on-tertiary-container flex items-center justify-center shrink-0 mt-0.5">
                 <span className="material-symbols-outlined text-sm">notification_important</span>
@@ -546,67 +886,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userProfile, onNavigateT
               </button>
             </div>
           )}
-        </div>
-
-        {/* Daily Rituals Progress */}
-        <div className="relative rounded-3xl p-4 bg-surface-container-lowest/95 backdrop-blur-xl shadow-xs flex flex-col gap-2.5 border border-surface-container-highest/60">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined text-primary text-xl">routine</span>
-              <h2 className="text-base text-on-surface font-bold">Daily Rituals</h2>
-            </div>
-            <span className="text-xs text-on-surface-variant font-semibold">
-              {rituals.filter((r) => r.status === 'Done').length} of {rituals.length} Completed
-            </span>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            {rituals.map((r) => (
-              <div
-                key={r.id}
-                onClick={() => toggleRitual(r.id)}
-                className="flex items-center justify-between p-2.5 rounded-2xl bg-surface-container-low border border-outline-variant/30 active:scale-[0.98] transition-all cursor-pointer"
-                role="button"
-                tabIndex={0}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div
-                    className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                      r.status === 'Done'
-                        ? 'bg-primary text-on-primary'
-                        : r.status === 'In Progress'
-                        ? 'bg-secondary-fixed text-secondary animate-pulse'
-                        : 'bg-surface-container-high text-on-surface-variant'
-                    }`}
-                  >
-                    <span className="material-symbols-outlined text-base">{r.icon}</span>
-                  </div>
-                  <div>
-                    <span
-                      className={`text-xs block font-bold leading-tight ${
-                        r.status === 'Done' ? 'line-through opacity-70 text-on-surface' : 'text-on-surface'
-                      }`}
-                    >
-                      {r.title}
-                    </span>
-                    <span className="text-[11px] text-on-surface-variant">{r.desc}</span>
-                  </div>
-                </div>
-
-                <span
-                  className={`text-[11px] px-2.5 py-0.5 rounded-full font-bold ${
-                    r.status === 'Done'
-                      ? 'bg-surface-container-high text-primary'
-                      : r.status === 'In Progress'
-                      ? 'bg-secondary-fixed text-on-secondary-fixed-variant'
-                      : 'bg-surface-container-high text-on-surface-variant'
-                  }`}
-                >
-                  {r.status}
-                </span>
-              </div>
-            ))}
-          </div>
         </div>
 
         {/* Mindful Anchor Banner */}
@@ -668,86 +947,24 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userProfile, onNavigateT
         </div>
       </main>
 
-      {/* Floating Native Bottom Navigation Dock */}
-      <nav
-        className="fixed bottom-4 inset-x-0 z-40 flex justify-center px-4 pointer-events-none pb-safe"
-        data-active-classes="bg-gradient-to-tr from-primary to-primary-container text-on-primary shadow-[0_8px_20px_-2px_rgba(79,70,229,0.38)]"
-      >
-        <div className="pointer-events-auto flex items-center justify-between w-full max-w-[390px] h-16 px-3 rounded-full bg-surface-container-lowest/90 backdrop-blur-2xl shadow-[0_16px_40px_-6px_rgba(19,27,46,0.12),0_2px_12px_rgba(53,37,205,0.06)] border border-surface-container-high/60">
-          {/* Home */}
-          <button
-            onClick={() => handleTabClick('home')}
-            aria-label="Home Dashboard"
-            className={`relative w-12 h-12 flex items-center justify-center rounded-full transition-all duration-300 active:scale-95 cursor-pointer ${
-              activeTab === 'home'
-                ? 'bg-gradient-to-tr from-primary to-primary-container text-on-primary shadow-[0_8px_20px_-2px_rgba(79,70,229,0.38)]'
-                : 'text-on-surface-variant hover:text-on-surface'
-            }`}
-            type="button"
-          >
-            <span className="material-symbols-outlined text-[24px]">home</span>
-          </button>
-
-          {/* Tasks & Routines */}
-          <button
-            onClick={() => handleTabClick('tasks')}
-            aria-label="Daily Tasks and Rituals"
-            className={`relative w-12 h-12 flex items-center justify-center rounded-full transition-all duration-300 active:scale-95 cursor-pointer ${
-              activeTab === 'tasks'
-                ? 'bg-gradient-to-tr from-primary to-primary-container text-on-primary shadow-[0_8px_20px_-2px_rgba(79,70,229,0.38)]'
-                : 'text-on-surface-variant hover:text-on-surface'
-            }`}
-            type="button"
-          >
-            <span className="material-symbols-outlined text-[24px]">check_circle</span>
-            <span className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-secondary ring-2 ring-surface-container-lowest" />
-          </button>
-
-          {/* AI Companion */}
-          <button
-            onClick={() => handleTabClick('companion')}
-            aria-label="Kairos AI Companion"
-            className={`relative w-12 h-12 flex items-center justify-center rounded-full transition-all duration-300 active:scale-95 cursor-pointer ${
-              activeTab === 'companion'
-                ? 'bg-gradient-to-tr from-primary to-primary-container text-on-primary shadow-[0_8px_20px_-2px_rgba(79,70,229,0.38)]'
-                : 'text-on-surface-variant hover:text-on-surface'
-            }`}
-            type="button"
-          >
-            <span className="material-symbols-outlined text-[24px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+      {/* Toast Feedback */}
+      {toastMsg && (
+        <div className="fixed top-18 inset-x-4 z-50 flex justify-center pointer-events-none animate-fade-in">
+          <div className="bg-inverse-surface text-inverse-on-surface px-3.5 py-2 rounded-xl shadow-xl flex items-center gap-2 text-xs font-semibold max-w-sm">
+            <span className="material-symbols-outlined text-[17px] text-primary-fixed">
               auto_awesome
             </span>
-          </button>
-
-          {/* Squad Quests */}
-          <button
-            onClick={() => handleTabClick('squad')}
-            aria-label="Friends and Squad Challenges"
-            className={`relative w-12 h-12 flex items-center justify-center rounded-full transition-all duration-300 active:scale-95 cursor-pointer ${
-              activeTab === 'squad'
-                ? 'bg-gradient-to-tr from-primary to-primary-container text-on-primary shadow-[0_8px_20px_-2px_rgba(79,70,229,0.38)]'
-                : 'text-on-surface-variant hover:text-on-surface'
-            }`}
-            type="button"
-          >
-            <span className="material-symbols-outlined text-[24px]">groups</span>
-          </button>
-
-          {/* Profile & Evolution */}
-          <button
-            onClick={() => handleTabClick('profile')}
-            aria-label="Profile Analytics and Evolution"
-            className={`relative w-12 h-12 flex items-center justify-center rounded-full transition-all duration-300 active:scale-95 cursor-pointer ${
-              activeTab === 'profile'
-                ? 'bg-gradient-to-tr from-primary to-primary-container text-on-primary shadow-[0_8px_20px_-2px_rgba(79,70,229,0.38)]'
-                : 'text-on-surface-variant hover:text-on-surface'
-            }`}
-            type="button"
-          >
-            <span className="material-symbols-outlined text-[24px]">person</span>
-          </button>
+            <span>{toastMsg}</span>
+          </div>
         </div>
-      </nav>
+      )}
+
+      {/* Floating Native Bottom Navigation Dock */}
+      <BottomNavBar
+        activeTab={activeTab}
+        onNavigateTab={handleTabClick}
+        userInitial={userProfile?.name?.[0] || 'A'}
+      />
     </div>
   );
 };

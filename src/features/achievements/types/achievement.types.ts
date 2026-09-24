@@ -48,10 +48,12 @@ export interface Achievement {
   id: string;
   name: string;
   title?: string;
+  seriesTitle?: string;
   description: string;
   category: AchievementCategory;
   rarity: AchievementRarity;
   modelType: ModelType;
+  modelUrl?: string;
   currentProgress: number;
   targetProgress: number;
   unit: string;

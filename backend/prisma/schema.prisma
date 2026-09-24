@@ -1,0 +1,304 @@
+// Kairos Database Foundation Schema (Phase E.2)
+// Provider: PostgreSQL via Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Core User Account Table
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique @db.VarChar(255)
+  passwordHash String    @map("password_hash") @db.VarChar(255)
+  status       String    @default("active") @db.VarChar(50)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz
+
+  // Relations
+  profile              UserProfile?
+  progression          ProgressionState?
+  refreshTokens        RefreshToken[]
+  tasks                Task[]
+  taskCompletions      TaskCompletion[]
+  achievementProgress  AchievementProgress[]
+  focusSessions        FocusSession[]
+  dailyReflections     DailyReflection[]
+  squadMemberships     SquadMember[]
+  connectionsInitiated Connection[]          @relation("InitiatedConnections")
+  connectionsReceived  Connection[]          @relation("ReceivedConnections")
+  syncOperations       SyncOperation[]
+
+  @@map("users")
+}
+
+/// Refresh Token Storage & Rotation Ledger
+model RefreshToken {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  tokenHash         String    @map("token_hash") @db.VarChar(255)
+  expiresAt         DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt         DateTime? @map("revoked_at") @db.Timestamptz
+  replacedByTokenId String?   @map("replaced_by_token_id") @db.VarChar(64)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+/// User Profile & Evolution Metadata Table
+model UserProfile {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @unique @map("user_id") @db.Uuid
+  name          String   @default("Kairos Voyager") @db.VarChar(100)
+  handle        String?  @db.VarChar(50)
+  bio           String?  @db.Text
+  quote         String?  @db.VarChar(255)
+  timezone      String   @default("UTC") @db.VarChar(50)
+  circadianType String   @default("moderate_early") @map("circadian_type") @db.VarChar(50)
+  avatarUrl     String?  @map("avatar_url") @db.VarChar(512)
+  bannerTheme   String?  @map("banner_theme") @db.VarChar(50)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_profiles")
+}
+
+/// User Authoritative Progression State Table
+model ProgressionState {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @unique @map("user_id") @db.Uuid
+  totalXp        Int      @default(0) @map("total_xp")
+  xpRemainder    Float    @default(0.0) @map("xp_remainder") @db.DoublePrecision
+  level          Int      @default(1)
+  todayHp        Int      @default(0) @map("today_hp")
+  lifetimeHp     Int      @default(0) @map("lifetime_hp")
+  streakCount    Int      @default(0) @map("streak_count")
+  lastActiveDate String   @default("") @map("last_active_date") @db.VarChar(10)
+  levelUpHistory Json?    @map("level_up_history")
+  version        BigInt   @default(1)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("progression_states")
+}
+
+/// User Custom and Timing Configured Tasks Table
+model Task {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  taskId          String    @map("task_id") @db.VarChar(64)
+  title           String    @db.VarChar(255)
+  category        String    @default("daily") @db.VarChar(50)
+  targetHp        Int       @default(15) @map("target_hp")
+  startTime       String?   @map("start_time") @db.VarChar(10)
+  endTime         String?   @map("end_time") @db.VarChar(10)
+  durationMinutes Int?      @map("duration_minutes")
+  isCustom        Boolean   @default(true) @map("is_custom")
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, taskId])
+  @@index([userId, isActive])
+  @@map("tasks")
+}
+
+/// Task Completion Anti-Duplication Ledger Table
+model TaskCompletion {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  taskId         String   @map("task_id") @db.VarChar(64)
+  completionDate String   @map("completion_date") @db.VarChar(10) // YYYY-MM-DD
+  completedAt    DateTime @default(now()) @map("completed_at") @db.Timestamptz
+  earnedXp       Float    @map("earned_xp") @db.DoublePrecision
+  earnedHp       Int      @map("earned_hp")
+  idempotencyKey String   @map("idempotency_key") @db.VarChar(128)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Primary Anti-Duplication Constraint: Exactly 1 completion per user per task per calendar date
+  @@unique([userId, taskId, completionDate], name: "unique_user_task_date")
+  // Idempotency Replay Protection Constraint: Exactly 1 execution per user per idempotency key
+  @@unique([userId, idempotencyKey], name: "unique_user_task_idempotency")
+  @@index([userId, completionDate])
+  @@map("task_completions")
+}
+
+/// Achievement Progress and Claims Table
+model AchievementProgress {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  achievementId   String    @map("achievement_id") @db.VarChar(64)
+  currentProgress Int       @default(0) @map("current_progress")
+  targetProgress  Int       @default(1) @map("target_progress")
+  isUnlocked      Boolean   @default(false) @map("is_unlocked")
+  unlockedAt      DateTime? @map("unlocked_at") @db.Timestamptz
+  rewardClaimed   Boolean   @default(false) @map("reward_claimed")
+  rewardXpAwarded Int       @default(0) @map("reward_xp_awarded")
+  rewardHpAwarded Int       @default(0) @map("reward_hp_awarded") // Strictly 0 HP invariant
+  idempotencyKey  String?   @map("idempotency_key") @db.VarChar(128)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId], name: "unique_user_achievement")
+  @@index([userId, isUnlocked])
+  @@map("achievement_progress")
+}
+
+/// Historical Focus Session Log Table
+model FocusSession {
+  id                    String   @id @default(uuid()) @db.Uuid
+  userId                String   @map("user_id") @db.Uuid
+  sessionId             String   @map("session_id") @db.VarChar(64)
+  title                 String   @db.VarChar(255)
+  category              String   @default("deep_work") @db.VarChar(50)
+  durationSeconds       Int      @map("duration_seconds")
+  targetDurationMinutes Int      @map("target_duration_minutes")
+  startedAt             DateTime @map("started_at") @db.Timestamptz
+  completedAt           DateTime @map("completed_at") @db.Timestamptz
+  flowScore             Int?     @map("flow_score")
+  rating                Int?
+  notes                 String?  @db.Text
+  interrupted           Boolean  @default(false)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sessionId], name: "unique_user_session")
+  @@index([userId, completedAt])
+  @@map("focus_sessions")
+}
+
+/// Daily Reflections Table
+model DailyReflection {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  date        String   @db.VarChar(10) // YYYY-MM-DD
+  mood        String?  @db.VarChar(50)
+  energyScore Int?     @map("energy_score")
+  focusRating Int?     @map("focus_rating")
+  wins        Json?
+  journalText String?  @map("journal_text") @db.Text
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date], name: "unique_user_reflection_date")
+  @@index([userId, date])
+  @@map("daily_reflections")
+}
+
+/// Squad Entity Table
+model Squad {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(100)
+  handle      String   @unique @db.VarChar(50)
+  description String?  @db.Text
+  bannerUrl   String?  @map("banner_url") @db.VarChar(512)
+  leagueTier  String   @default("Bronze") @map("league_tier") @db.VarChar(50)
+  totalXp     Int      @default(0) @map("total_xp")
+  memberCount Int      @default(1) @map("member_count")
+  maxMembers  Int      @default(10) @map("max_members")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  members    SquadMember[]
+  challenges SquadChallenge[]
+
+  @@map("squads")
+}
+
+/// Squad Membership Association Table
+model SquadMember {
+  id                 String   @id @default(uuid()) @db.Uuid
+  squadId            String   @map("squad_id") @db.Uuid
+  userId             String   @map("user_id") @db.Uuid
+  role               String   @default("member") @db.VarChar(50)
+  contributionPoints Int      @default(0) @map("contribution_points")
+  joinedAt           DateTime @default(now()) @map("joined_at") @db.Timestamptz
+
+  squad Squad @relation(fields: [squadId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([squadId, userId], name: "unique_squad_member")
+  @@index([userId])
+  @@map("squad_members")
+}
+
+/// Shared Squad Challenges Table
+model SquadChallenge {
+  id           String   @id @default(uuid()) @db.Uuid
+  squadId      String   @map("squad_id") @db.Uuid
+  title        String   @db.VarChar(255)
+  category     String   @db.VarChar(50)
+  targetCount  Int      @map("target_count")
+  currentCount Int      @default(0) @map("current_count")
+  startDate    DateTime @map("start_date") @db.Timestamptz
+  endDate      DateTime @map("end_date") @db.Timestamptz
+  isCompleted  Boolean  @default(false) @map("is_completed")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  squad Squad @relation(fields: [squadId], references: [id], onDelete: Cascade)
+
+  @@index([squadId, isCompleted])
+  @@map("squad_challenges")
+}
+
+/// Social Peer Connection Table
+model Connection {
+  id          String   @id @default(uuid()) @db.Uuid
+  initiatorId String   @map("initiator_id") @db.Uuid
+  receiverId  String   @map("receiver_id") @db.Uuid
+  status      String   @default("pending") @db.VarChar(50) // pending, accepted, rejected, blocked
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  initiator User @relation("InitiatedConnections", fields: [initiatorId], references: [id], onDelete: Cascade)
+  receiver  User @relation("ReceivedConnections", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([initiatorId, receiverId], name: "unique_connection_pair")
+  @@index([receiverId, status])
+  @@map("connections")
+}
+
+/// Sync Ingestion & General Idempotency Ledger Table
+model SyncOperation {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  idempotencyKey  String    @map("idempotency_key") @db.VarChar(128)
+  entityType      String    @map("entity_type") @db.VarChar(50)
+  entityId        String    @map("entity_id") @db.VarChar(64)
+  operationType   String    @map("operation_type") @db.VarChar(50)
+  payload         Json?
+  status          String    @default("PROCESSED") @db.VarChar(50)
+  clientTimestamp DateTime? @map("client_timestamp") @db.Timestamptz
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, idempotencyKey], name: "unique_user_sync_op")
+  @@index([userId, entityType])
+  @@map("sync_operations")
+}

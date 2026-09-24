@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
 interface OnboardingScreenProps {
+  userProfile?: { email: string; name: string } | null;
   onBack: () => void;
   onFinish: () => void;
 }
@@ -142,16 +143,16 @@ const ARCHETYPES = [
 
 const VOICES = [
   { id: 'aura', name: 'Aura', desc: 'Warm & Encouraging • Feminine Tone' },
-  { id: 'echo', name: 'Echo', desc: 'Direct & Crisp • Neutral Cadence' },
+  { id: 'echo', name: 'Echo', desc: 'Direct & Crisp • Neutral Pace' },
   { id: 'sol', name: 'Sol', desc: 'Calm & Reflective • Deep Rhythm' },
   { id: 'zephyr', name: 'Zephyr', desc: 'Dynamic & Energetic • Uplifting Pace' }
 ];
 
-export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onBack, onFinish }) => {
+export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ userProfile, onBack, onFinish }) => {
   const [step, setStep] = useState<number>(1);
 
   // Step 1 State
-  const [preferredName, setPreferredName] = useState('Alex');
+  const [preferredName, setPreferredName] = useState(userProfile?.name || '');
   const [dob, setDob] = useState('2001-08-14');
   const [occupation, setOccupation] = useState('college');
 
@@ -232,7 +233,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onBack, onFi
       case 2:
         return 'Intentions';
       case 3:
-        return 'Cadence';
+        return 'Daily Rhythm';
       case 4:
         return 'AI Companion';
       default:
@@ -313,7 +314,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onBack, onFi
                 Welcome, let's get acquainted
               </h1>
               <p className="text-sm leading-relaxed text-on-surface-variant">
-                Tell us a bit about yourself so Kairos can calibrate your daily cadence.
+                Tell us a bit about yourself so Kairos can calibrate your daily rhythm.
               </p>
             </section>
 
@@ -527,7 +528,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onBack, onFi
           <div className="flex flex-col gap-4 animate-fade-in">
             <section className="space-y-1">
               <h1 className="text-2xl font-extrabold text-on-surface tracking-tight">
-                Your Professional Cadence
+                Your Professional Rhythm
               </h1>
               <p className="text-sm leading-relaxed text-on-surface-variant">
                 Understanding your daily workflow helps Kairos adapt recommendations to your natural tempo.
@@ -919,7 +920,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onBack, onFi
               <div className="flex items-center gap-2.5">
                 <span className="material-symbols-outlined text-primary text-[22px]">verified_user</span>
                 <div>
-                  <p className="font-bold text-on-surface">Cadence Calibrated</p>
+                  <p className="font-bold text-on-surface">Rhythm Calibrated</p>
                   <p className="text-[11px] text-outline">Encrypted &amp; private by default</p>
                 </div>
               </div>

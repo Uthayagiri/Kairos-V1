@@ -1,9 +1,17 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { AppTopBar } from '../components/AppTopBar';
+import { useProgression } from '../features/progression';
+import {
+  STORAGE_DOMAINS,
+  getUserScopedJSON,
+  setUserScopedJSON
+} from '../features/storage';
 
 interface CompanionScreenProps {
   userProfile?: { email: string; name: string } | null;
   onNavigateTab?: (tab: string) => void;
+  onBack?: () => void;
 }
 
 interface ChatMessage {
@@ -76,7 +84,13 @@ const PERSONAS: Persona[] = [
   }
 ];
 
-export const CompanionScreen: React.FC<CompanionScreenProps> = ({ userProfile, onNavigateTab }) => {
+export const CompanionScreen: React.FC<CompanionScreenProps> = ({
+  userProfile,
+  onNavigateTab,
+  onBack
+}) => {
+  const progression = useProgression();
+
   // Drawer & Modals State
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [attachmentSheetOpen, setAttachmentSheetOpen] = useState(false);
@@ -87,9 +101,15 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({ userProfile, o
   // Active Companion Persona
   const [activePersona, setActivePersona] = useState<Persona>(PERSONAS[0]);
 
+  // Flow HP Progress derived strictly from authoritative progression state
+  const hpProgress = useMemo(() => {
+    return progression.dailyHpThreshold > 0
+      ? Math.min(100, Math.round((progression.todayHP / progression.dailyHpThreshold) * 100))
+      : 0;
+  }, [progression.todayHP, progression.dailyHpThreshold]);
+
   // Quiz State
   const [quizSelected, setQuizSelected] = useState<number | null>(null);
-  const [cadenceHp, setCadenceHp] = useState(85);
 
   // Device Action Undo State
   const [calendarActionUndone, setCalendarActionUndone] = useState(false);
@@ -105,70 +125,117 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({ userProfile, o
   const feedEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Initial Conversation
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'msg-1',
-      sender: 'user',
-      text: 'Explain Paxos consensus simply and remind me to review at 4 PM',
-      timestamp: '11:42 AM',
-      status: 'delivered'
-    },
-    {
-      id: 'msg-2',
-      sender: 'companion',
-      timestamp: '11:42 AM',
-      structuredContent: {
-        type: 'paxos-explanation',
-        title: 'Paxos Simplified: The Parliamentary Protocol',
-        description:
-          'Think of Paxos as a distributed legislature voting on a single bill even if messengers get lost or nodes fall asleep:',
-        steps: [
-          {
-            num: 1,
-            title: 'Proposers (Delegates)',
-            desc: 'Draft laws with a numbered ticket: “Prepare proposal #42”.'
-          },
-          {
-            num: 2,
-            title: 'Acceptors (Parliament)',
-            desc: 'Promise to reject any older numbered drafts and vote on the newest proposal.'
-          },
-          {
-            num: 3,
-            title: 'Learners (Citizens)',
-            desc: 'Adopt the decided value once a strict majority (quorum) agrees.'
-          }
-        ],
-        ruleOfThumb: 'Rule of Thumb: Safety guaranteed, liveness not bulletproof.',
-        quiz: {
-          question:
-            'In basic Paxos, who initiates a proposal with a uniquely incremented identifier?',
-          options: [
+  const INITIAL_CONVERSATION: ChatMessage[] = useMemo(
+    () => [
+      {
+        id: 'msg-1',
+        sender: 'user',
+        text: 'Explain Paxos consensus simply and remind me to review at 4 PM',
+        timestamp: '11:42 AM',
+        status: 'delivered'
+      },
+      {
+        id: 'msg-2',
+        sender: 'companion',
+        timestamp: '11:42 AM',
+        structuredContent: {
+          type: 'paxos-explanation',
+          title: 'Paxos Simplified: The Parliamentary Protocol',
+          description:
+            'Think of Paxos as a distributed legislature voting on a single bill even if messengers get lost or nodes fall asleep:',
+          steps: [
             {
-              label: 'A',
-              text: 'The Proposer Node',
-              isCorrect: true,
-              feedback: 'Correct! Proposers initiate ballots with incremented proposal numbers.'
+              num: 1,
+              title: 'Proposers (Delegates)',
+              desc: 'Draft laws with a numbered ticket: “Prepare proposal #42”.'
             },
             {
-              label: 'B',
-              text: 'The Citizen Learner',
-              isCorrect: false,
-              feedback: 'Incorrect. Learners only listen to adopted consensus values.'
+              num: 2,
+              title: 'Acceptors (Parliament)',
+              desc: 'Promise to reject any older numbered drafts and vote on the newest proposal.'
+            },
+            {
+              num: 3,
+              title: 'Learners (Citizens)',
+              desc: 'Adopt the decided value once a strict majority (quorum) agrees.'
             }
-          ]
-        },
-        deviceAction: {
-          actionType: 'Calendar',
-          title: 'Calendar: Review Paxos',
-          subtitle: 'Today @ 4:00 PM – 4:30 PM • 15m notification set',
-          xpReward: '+15 HP Cognitive Cadence',
-          memoryCategory: 'Memory: Study/Distributed Systems'
+          ],
+          ruleOfThumb: 'Rule of Thumb: Safety guaranteed, liveness not bulletproof.',
+          quiz: {
+            question:
+              'In basic Paxos, who initiates a proposal with a uniquely incremented identifier?',
+            options: [
+              {
+                label: 'A',
+                text: 'The Proposer Node',
+                isCorrect: true,
+                feedback: 'Correct! Proposers initiate ballots with incremented proposal numbers.'
+              },
+              {
+                label: 'B',
+                text: 'The Citizen Learner',
+                isCorrect: false,
+                feedback: 'Incorrect. Learners only listen to adopted consensus values.'
+              }
+            ]
+          },
+          deviceAction: {
+            actionType: 'Calendar',
+            title: 'Calendar: Review Paxos',
+            subtitle: 'Today @ 4:00 PM – 4:30 PM • 15m notification set',
+            xpReward: '+15 HP Cognitive Rhythm',
+            memoryCategory: 'Memory: Study/Distributed Systems'
+          }
         }
       }
+    ],
+    []
+  );
+
+  // Initial Conversation
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    const loaded = getUserScopedJSON<ChatMessage[] | null>(
+      STORAGE_DOMAINS.COMPANION_CHAT,
+      null,
+      userProfile
+    );
+    return Array.isArray(loaded) && loaded.length > 0 ? loaded : INITIAL_CONVERSATION;
+  });
+  const isInitialMount = useRef(true);
+
+  // Sync conversation on user switch
+  useEffect(() => {
+    const loaded = getUserScopedJSON<ChatMessage[] | null>(
+      STORAGE_DOMAINS.COMPANION_CHAT,
+      null,
+      userProfile
+    );
+    setMessages(Array.isArray(loaded) && loaded.length > 0 ? loaded : INITIAL_CONVERSATION);
+  }, [userProfile, INITIAL_CONVERSATION]);
+
+  // Persist messages on updates (capped to 50 items)
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
     }
-  ]);
+    if (messages && messages.length > 0) {
+      const capped = messages.slice(-50);
+      try {
+        setUserScopedJSON(STORAGE_DOMAINS.COMPANION_CHAT, capped, userProfile);
+      } catch (err) {
+        console.warn('Failed to persist companion chat:', err);
+      }
+    }
+  }, [messages, userProfile]);
+
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   const triggerHaptic = (style: ImpactStyle = ImpactStyle.Light) => {
     try {
@@ -179,9 +246,11 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({ userProfile, o
   };
 
   const showToast = (msg: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToastMessage(msg);
-    setTimeout(() => {
+    toastTimerRef.current = setTimeout(() => {
       setToastMessage(null);
+      toastTimerRef.current = null;
     }, 2800);
   };
 
@@ -223,8 +292,7 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({ userProfile, o
     triggerHaptic(isCorrect ? ImpactStyle.Medium : ImpactStyle.Heavy);
     setQuizSelected(index);
     if (isCorrect && quizSelected !== index) {
-      setCadenceHp((prev) => Math.min(100, prev + 5));
-      showToast('⚡ +5 HP Cognitive Cadence Earned!');
+      showToast('⚡ Correct! Knowledge anchored in memory.');
     }
   };
 
@@ -346,7 +414,7 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({ userProfile, o
               {
                 num: 2,
                 title: 'Actionable Workflow',
-                desc: 'Break into 25-minute Pomodoro cadence with zero context switching.'
+                desc: 'Break into 25-minute Pomodoro rhythm with zero context switching.'
               },
               {
                 num: 3,
@@ -359,7 +427,7 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({ userProfile, o
               actionType: 'Routine Sync',
               title: `Neural Anchor: ${trimmed.slice(0, 24)}...`,
               subtitle: 'Logged in Kairos Memory Vault • Auto-categorized',
-              xpReward: '+10 HP Cadence',
+              xpReward: '+10 HP Flow',
               memoryCategory: 'Memory: Cognitive Focus'
             }
           }
@@ -371,7 +439,7 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({ userProfile, o
   };
 
   return (
-    <div className="font-sans text-slate-800 bg-[#F7F8FC] antialiased min-h-screen flex flex-col justify-between select-none relative overflow-x-hidden">
+    <div className="font-sans text-slate-800 bg-[#F7F8FC] antialiased w-full h-full flex flex-col justify-between select-none relative overflow-x-hidden animate-fade-in">
       {/* Toast Notification Banner */}
       {toastMessage && (
         <div className="fixed top-16 inset-x-0 z-50 flex justify-center px-4 pointer-events-none animate-fade-in">
@@ -382,94 +450,20 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({ userProfile, o
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* BEGIN: TopNavigation                                                      */}
-      {/* ========================================================================= */}
-      <header className="sticky top-0 z-40 bg-[#F7F8FC]/90 backdrop-blur-md px-4 pt-3 pb-3 border-b border-slate-100 flex items-center justify-between">
-        {/* Back Button */}
-        <button
-          aria-label="Go back"
-          className="w-9 h-9 flex items-center justify-center rounded-full text-slate-700 active:bg-slate-200/60 transition-colors cursor-pointer"
-          type="button"
-          onClick={() => handleTabClick('home')}
-          data-screen="SCREEN_22"
-        >
-          <svg
-            className="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="2.2"
-            viewBox="0 0 24 24"
-          >
-            <path d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
-
-        {/* Center Identity / Avatar */}
-        <div
-          className="flex items-center space-x-3 cursor-pointer"
-          onClick={() => setDrawerOpen(true)}
-        >
-          <div className="relative flex items-center justify-center">
-            {/* Radiant Glow Aura */}
-            <div
-              className={`absolute -inset-1.5 bg-gradient-to-tr ${activePersona.gradient} rounded-full blur-[6px] opacity-70 animate-pulse`}
-            />
-            {/* Monogram Badge */}
-            <div
-              className={`relative w-10 h-10 rounded-full bg-gradient-to-tr ${activePersona.gradient} flex items-center justify-center text-white font-bold text-lg shadow-inner ring-2 ring-white`}
-            >
-              <span className="tracking-tighter">K</span>
-            </div>
-          </div>
-          <div className="flex flex-col text-left">
-            <div className="flex items-center space-x-1.5">
-              <span className="text-base font-extrabold tracking-tight text-slate-900 leading-tight">
-                Kairos
-              </span>
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            </div>
-            <span className="text-[11px] font-medium text-slate-500 tracking-wide">
-              {activePersona.name} • Chat
-            </span>
-          </div>
-        </div>
-
-        {/* Right Menu Toggle */}
-        <button
-          aria-label="Open sidebar drawer"
-          className="w-9 h-9 flex items-center justify-center rounded-full text-slate-800 hover:bg-slate-200/60 active:scale-95 transition-all cursor-pointer"
-          id="open-drawer-btn"
-          type="button"
-          onClick={() => {
-            triggerHaptic(ImpactStyle.Light);
-            setDrawerOpen(true);
-          }}
-        >
-          <svg
-            className="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="2"
-            viewBox="0 0 24 24"
-          >
-            <line x1="4" x2="20" y1="6" y2="6" />
-            <line x1="4" x2="20" y1="12" y2="12" />
-            <line x1="4" x2="20" y1="18" y2="18" />
-          </svg>
-        </button>
-      </header>
-      {/* END: TopNavigation */}
+      {/* Top Header App Bar (Left: Back Arrow Head in front of Orb + Splash Orb + Title/Subtitle) */}
+      <AppTopBar
+        subtitle={`${activePersona.name} • AI Companion`}
+        onBack={() => {
+          if (onBack) onBack();
+          else if (onNavigateTab) onNavigateTab('home');
+        }}
+      />
 
       {/* ========================================================================= */}
       {/* BEGIN: ChatFeedArea                                                       */}
       {/* ========================================================================= */}
       <main
-        className="flex-1 w-full max-w-md mx-auto px-4 py-4 space-y-5 pb-40 overflow-y-auto mobile-scroll"
+        className="flex-1 w-full max-w-md mx-auto px-4 py-4 space-y-5 pb-24 overflow-y-auto mobile-scroll"
         data-purpose="chat-feed"
       >
         {messages.map((msg) => {
@@ -758,7 +752,7 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({ userProfile, o
                 </article>
               )}
 
-              {/* Structured Card 3: Autonomous Device Action & Memory Cadence */}
+              {/* Structured Card 3: Autonomous Device Action & Memory Routine */}
               {content?.deviceAction && (
                 <article
                   className="bg-white rounded-3xl p-5 shadow-card border border-slate-100 space-y-3.5"
@@ -829,10 +823,10 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({ userProfile, o
 
                   {/* Action Chips (XP & Memory Vault) */}
                   <div className="flex flex-wrap gap-2 pt-1">
-                    {/* Cadence XP Pill */}
+                    {/* Flow XP Pill */}
                     <div
                       className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-rose-50 border border-rose-100 text-rose-700 text-[11px] font-bold cursor-pointer active:scale-95 transition-transform"
-                      onClick={() => showToast('Cadence HP tracks your cognitive sync efficiency')}
+                      onClick={() => showToast('Flow HP tracks your cognitive sync efficiency')}
                     >
                       <svg className="w-3 h-3 text-rose-500 fill-rose-500" viewBox="0 0 24 24">
                         <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
@@ -1163,9 +1157,8 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({ userProfile, o
       {/* BEGIN: FloatingInputConsole                                               */}
       {/* ========================================================================= */}
       <footer
-        className="fixed inset-x-0 z-40 max-w-md mx-auto px-4 pb-6 pt-2 pointer-events-none"
+        className="fixed inset-x-0 bottom-0 z-40 max-w-md mx-auto px-4 pb-4 pt-2 pointer-events-none pb-safe"
         data-purpose="floating-bottom-bar"
-        style={{ bottom: '64px' }}
       >
         {attachedFile && (
           <div className="pointer-events-auto mb-2 mx-2 bg-indigo-50/90 border border-indigo-200 text-indigo-800 text-xs px-3 py-1.5 rounded-xl flex items-center justify-between shadow-sm animate-fade-in">
@@ -1230,9 +1223,9 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({ userProfile, o
             />
           </div>
 
-          {/* Audio Cadence Waveform Button */}
+          {/* Audio Voice Waveform Button */}
           <button
-            aria-label="Voice Cadence Stream"
+            aria-label="Voice Stream"
             className="w-10 h-10 rounded-full border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100/70 active:scale-95 flex items-center justify-center text-indigo-600 transition-all flex-shrink-0 cursor-pointer"
             type="button"
             onClick={() => {
@@ -1297,87 +1290,6 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({ userProfile, o
         </div>
       </footer>
       {/* END: FloatingInputConsole */}
-
-      {/* ========================================================================= */}
-      {/* BEGIN: BottomNavigation                                                   */}
-      {/* ========================================================================= */}
-      <nav
-        className="fixed bottom-0 inset-x-0 z-40 max-w-md mx-auto bg-white/95 backdrop-blur-xl border-t border-slate-200/80 px-2 py-2 flex items-center justify-around shadow-lg"
-        data-purpose="bottom-navigation"
-      >
-        <button
-          type="button"
-          className="flex flex-col items-center justify-center flex-1 py-1 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
-          data-screen="SCREEN_22"
-          aria-label="Home"
-          onClick={() => handleTabClick('home')}
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-            <polyline points="9 22 9 12 15 12 15 22" />
-          </svg>
-          <span className="text-[10px] font-semibold mt-0.5">Home</span>
-        </button>
-
-        <button
-          type="button"
-          className="flex flex-col items-center justify-center flex-1 py-1 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
-          data-screen="SCREEN_20"
-          aria-label="Tasks & Routines Hub"
-          onClick={() => handleTabClick('tasks')}
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <rect height="18" rx="2" width="18" x="3" y="3" />
-            <polyline points="9 11 12 14 22 4" />
-            <line x1="9" x2="15" y1="17" y2="17" />
-          </svg>
-          <span className="text-[10px] font-semibold mt-0.5">Tasks</span>
-        </button>
-
-        <button
-          type="button"
-          className="flex flex-col items-center justify-center flex-1 py-1 text-indigo-600 font-bold transition-colors cursor-pointer"
-          data-screen="SCREEN_11"
-          aria-label="Kairos AI Companion"
-          onClick={() => handleTabClick('companion')}
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-          </svg>
-          <span className="text-[10px] font-bold mt-0.5 text-indigo-600">Companion</span>
-        </button>
-
-        <button
-          type="button"
-          className="flex flex-col items-center justify-center flex-1 py-1 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
-          data-screen="SCREEN_12"
-          aria-label="Friends & Squad Challenges"
-          onClick={() => handleTabClick('squad')}
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-            <circle cx="9" cy="7" r="4" />
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-          </svg>
-          <span className="text-[10px] font-semibold mt-0.5">Squad</span>
-        </button>
-
-        <button
-          type="button"
-          className="flex flex-col items-center justify-center flex-1 py-1 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
-          data-screen="SCREEN_29"
-          aria-label="Profile - Analytics & Evolution"
-          onClick={() => handleTabClick('profile')}
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-            <circle cx="12" cy="7" r="4" />
-          </svg>
-          <span className="text-[10px] font-semibold mt-0.5">Profile</span>
-        </button>
-      </nav>
-      {/* END: BottomNavigation */}
 
       {/* ========================================================================= */}
       {/* BEGIN: NavigationDrawerSidebar                                            */}
@@ -1533,13 +1445,13 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({ userProfile, o
             </div>
             <div className="p-3 bg-[#F6F8FD] rounded-2xl border border-slate-100 space-y-2">
               <div className="flex justify-between items-center text-xs">
-                <span className="text-slate-500 font-medium">Cadence HP</span>
-                <span className="font-extrabold text-rose-600">{cadenceHp} / 100 HP</span>
+                <span className="text-slate-500 font-medium">Flow HP</span>
+                <span className="font-extrabold text-rose-600">{progression.todayHP} / {progression.dailyHpThreshold} HP</span>
               </div>
               <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-rose-500 rounded-full transition-all duration-500"
-                  style={{ width: `${cadenceHp}%` }}
+                  style={{ width: `${hpProgress}%` }}
                 />
               </div>
               <div className="pt-1 flex items-center justify-between text-[11px] text-slate-500">
@@ -1584,13 +1496,13 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({ userProfile, o
       {/* END: NavigationDrawerSidebar */}
 
       {/* ========================================================================= */}
-      {/* MODAL: Voice Cadence Live Stream Overlay                                 */}
+      {/* MODAL: Voice Stream Live Overlay                                         */}
       {/* ========================================================================= */}
       {voiceStreamOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xl flex flex-col items-center justify-between p-6 animate-fade-in">
           <div className="w-full flex items-center justify-between text-white/70 pt-safe">
             <span className="text-xs uppercase font-bold tracking-widest text-indigo-400">
-              Voice Cadence Active • {activePersona.name}
+              Voice Stream Active • {activePersona.name}
             </span>
             <button
               onClick={() => setVoiceStreamOpen(false)}

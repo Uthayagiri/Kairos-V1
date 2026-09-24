@@ -138,7 +138,7 @@ export const MeetKairosScreen: React.FC<MeetKairosScreenProps> = ({ onGetStarted
             </span>
           </h1>
           <p className="text-sm text-on-surface-variant leading-relaxed max-w-sm">
-            A sentient cadence of personal intelligence, intentional routines, and mindful vitality crafted around your human flow.
+            A sentient rhythm of personal intelligence, intentional routines, and mindful vitality crafted around your human flow.
           </p>
         </div>
 

@@ -1,5 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { BottomNavBar } from '../components/BottomNavBar';
+import { AppTopBar } from '../components/AppTopBar';
+import { CardBadgePreview } from '../features/achievements/components/CardBadgePreview';
+import { Achievement, ModelType, AchievementRarity } from '../features/achievements/types/achievement.types';
+import { useAchievementProgress } from '../features/achievements/hooks/useAchievementProgress';
+import { calculateAchievementXpReward } from '../features/achievements/utils/achievementHelpers';
+import { useProgression, TaskCompletionRecord } from '../features/progression';
+import {
+  ConnectionUser,
+  resolveScannedUserProfile,
+  MonthlyWebGraph,
+  UniqueQRCodeSVG,
+  TopAchievementsShowcase,
+  Timeline24HourGraph
+} from './ConnectionsScreen';
+import { syncQueue, syncSerializer } from '../features/sync';
 
 interface ProfileScreenProps {
   userProfile?: { email: string; name: string } | null;
@@ -10,167 +26,24 @@ interface ProfileScreenProps {
   onOpenAchievements?: () => void;
 }
 
-interface Achievement {
-  id: string;
-  title: string;
-  description: string;
-  hpReward: number;
-  icon: string;
-  category: 'consistency' | 'deep-work' | 'circadian' | 'neural' | 'squad' | 'mastery';
-  isUnlocked: boolean;
-  unlockedDate?: string;
-  progress?: { current: number; total: number };
-  badgeBg: string;
-  badgeText: string;
-  badgePillBg: string;
-  badgePillText: string;
-}
-
-const ACHIEVEMENTS_DATA: Achievement[] = [
-  {
-    id: 'ach-1',
-    title: '7-Day Unbroken Flow',
-    description: '7 consecutive days meeting all circadian ritual cadences',
-    hpReward: 120,
-    icon: 'trophy',
-    category: 'consistency',
-    isUnlocked: true,
-    unlockedDate: 'Yesterday',
-    badgeBg: 'bg-tertiary-fixed',
-    badgeText: 'text-tertiary',
-    badgePillBg: 'bg-tertiary-container/20',
-    badgePillText: 'text-tertiary'
-  },
-  {
-    id: 'ach-2',
-    title: 'Deep Work Master',
-    description: 'Completed 100 high-cognitive study hours',
-    hpReward: 250,
-    icon: 'bolt',
-    category: 'deep-work',
-    isUnlocked: true,
-    unlockedDate: '3 days ago',
-    badgeBg: 'bg-primary-fixed',
-    badgeText: 'text-primary',
-    badgePillBg: 'bg-primary-fixed/40',
-    badgePillText: 'text-primary'
-  },
-  {
-    id: 'ach-3',
-    title: 'Dawn Sovereign',
-    description: '21 early wake-up & circadian photonic rituals',
-    hpReward: 180,
-    icon: 'wb_twilight',
-    category: 'circadian',
-    isUnlocked: true,
-    unlockedDate: 'Sep 10',
-    badgeBg: 'bg-secondary-fixed',
-    badgeText: 'text-secondary',
-    badgePillBg: 'bg-secondary-fixed/50',
-    badgePillText: 'text-secondary'
-  },
-  {
-    id: 'ach-4',
-    title: 'Neural Synthesis',
-    description: '50 active recall quizzes aced with Aura Companion',
-    hpReward: 200,
-    icon: 'psychology',
-    category: 'neural',
-    isUnlocked: true,
-    unlockedDate: 'Sep 06',
-    badgeBg: 'bg-primary-fixed',
-    badgeText: 'text-primary',
-    badgePillBg: 'bg-primary-fixed/40',
-    badgePillText: 'text-primary'
-  },
-  {
-    id: 'ach-5',
-    title: 'Squad Vanguard',
-    description: 'Led squad to #1 victory in weekly challenge',
-    hpReward: 300,
-    icon: 'shield',
-    category: 'squad',
-    isUnlocked: true,
-    unlockedDate: 'Sep 01',
-    badgeBg: 'bg-secondary-fixed',
-    badgeText: 'text-secondary',
-    badgePillBg: 'bg-secondary-fixed/50',
-    badgePillText: 'text-secondary'
-  },
-  // Additional achievements for View All modal
-  {
-    id: 'ach-6',
-    title: 'Centurion Streak',
-    description: 'Maintain an active daily study streak for 30 consecutive days',
-    hpReward: 500,
-    icon: 'local_fire_department',
-    category: 'consistency',
-    isUnlocked: false,
-    progress: { current: 18, total: 30 },
-    badgeBg: 'bg-surface-container-high',
-    badgeText: 'text-on-surface-variant',
-    badgePillBg: 'bg-surface-container',
-    badgePillText: 'text-on-surface-variant'
-  },
-  {
-    id: 'ach-7',
-    title: 'Polymath Prodigy',
-    description: 'Log verified progress across 5 distinct academic disciplines',
-    hpReward: 350,
-    icon: 'school',
-    category: 'mastery',
-    isUnlocked: false,
-    progress: { current: 3, total: 5 },
-    badgeBg: 'bg-surface-container-high',
-    badgeText: 'text-on-surface-variant',
-    badgePillBg: 'bg-surface-container',
-    badgePillText: 'text-on-surface-variant'
-  },
-  {
-    id: 'ach-8',
-    title: 'Flow Ascendant',
-    description: 'Complete a 4-hour uninterrupted deep focus block with zero context switches',
-    hpReward: 400,
-    icon: 'self_improvement',
-    category: 'deep-work',
-    isUnlocked: false,
-    progress: { current: 2, total: 4 },
-    badgeBg: 'bg-surface-container-high',
-    badgeText: 'text-on-surface-variant',
-    badgePillBg: 'bg-surface-container',
-    badgePillText: 'text-on-surface-variant'
-  },
-  {
-    id: 'ach-9',
-    title: 'Solar Synchrony',
-    description: 'Sync sleep and wake cadences with natural circadian rhythm for 14 straight days',
-    hpReward: 300,
-    icon: 'bedtime',
-    category: 'circadian',
-    isUnlocked: false,
-    progress: { current: 9, total: 14 },
-    badgeBg: 'bg-surface-container-high',
-    badgeText: 'text-on-surface-variant',
-    badgePillBg: 'bg-surface-container',
-    badgePillText: 'text-on-surface-variant'
-  },
-  {
-    id: 'ach-10',
-    title: 'Squad Sovereign',
-    description: 'Mentor 5 squad members and assist them in clearing milestone study rituals',
-    hpReward: 450,
-    icon: 'groups',
-    category: 'squad',
-    isUnlocked: false,
-    progress: { current: 4, total: 5 },
-    badgeBg: 'bg-surface-container-high',
-    badgeText: 'text-on-surface-variant',
-    badgePillBg: 'bg-surface-container',
-    badgePillText: 'text-on-surface-variant'
+export const getRarityPillStyle = (rarity: AchievementRarity): string => {
+  switch (rarity) {
+    case 'legendary':
+      return 'bg-yellow-100 text-yellow-800';
+    case 'epic':
+      return 'bg-indigo-100 text-indigo-800';
+    case 'rare':
+      return 'bg-amber-100 text-amber-800';
+    case 'uncommon':
+      return 'bg-emerald-100 text-emerald-800';
+    case 'mythic':
+      return 'bg-rose-100 text-rose-800';
+    default:
+      return 'bg-slate-100 text-slate-800';
   }
-];
+};
 
-interface DailyCadenceData {
+export interface DailyRhythmData {
   day: string;
   tasksPct: number;
   tasksCount: number;
@@ -179,15 +52,104 @@ interface DailyCadenceData {
   isPeak?: boolean;
 }
 
-const WEEKLY_CADENCE: DailyCadenceData[] = [
-  { day: 'Mon', tasksPct: 45, tasksCount: 7, hpPct: 35, hpCount: 280 },
-  { day: 'Tue', tasksPct: 60, tasksCount: 9, hpPct: 55, hpCount: 410 },
-  { day: 'Wed', tasksPct: 70, tasksCount: 11, hpPct: 65, hpCount: 490 },
-  { day: 'Thu', tasksPct: 95, tasksCount: 14, hpPct: 90, hpCount: 620, isPeak: true },
-  { day: 'Fri', tasksPct: 65, tasksCount: 10, hpPct: 60, hpCount: 450 },
-  { day: 'Sat', tasksPct: 40, tasksCount: 6, hpPct: 30, hpCount: 220 },
-  { day: 'Sun', tasksPct: 50, tasksCount: 8, hpPct: 45, hpCount: 340 }
-];
+export const DAY_FULL_NAMES: Record<string, string> = {
+  Mon: 'Monday',
+  Tue: 'Tuesday',
+  Wed: 'Wednesday',
+  Thu: 'Thursday',
+  Fri: 'Friday',
+  Sat: 'Saturday',
+  Sun: 'Sunday'
+};
+
+const DAY_ABBRS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+export function calculateWeeklyRhythm(
+  taskHistory: TaskCompletionRecord[] = [],
+  referenceDate: Date = new Date()
+): DailyRhythmData[] {
+  const d = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate());
+  const dayOfWeek = d.getDay(); // 0 is Sunday, 1 is Monday, ..., 6 is Saturday
+  // Calculate distance to Monday (ISO week standard: Monday = 1)
+  const distanceToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() + distanceToMonday);
+
+  const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  const daysData = DAY_ABBRS.map((dayAbbr, idx) => {
+    const currentDay = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + idx);
+    const dateStr = `${currentDay.getFullYear()}-${String(currentDay.getMonth() + 1).padStart(2, '0')}-${String(currentDay.getDate()).padStart(2, '0')}`;
+
+    // If day is strictly in the future relative to local referenceDate, return 0 activity
+    if (dateStr > todayStr) {
+      return {
+        day: dayAbbr,
+        tasksCount: 0,
+        hpCount: 0,
+        tasksPct: 0,
+        hpPct: 0,
+        isPeak: false
+      };
+    }
+
+    const dayRecords = (taskHistory || []).filter(
+      (r) => r.date === dateStr || (r.completedAt && r.completedAt.slice(0, 10) === dateStr)
+    );
+    const tasksCount = dayRecords.length;
+    const hpCount = dayRecords.reduce((sum, r) => sum + (r.hpAwarded || 0), 0);
+
+    return {
+      day: dayAbbr,
+      tasksCount,
+      hpCount,
+      tasksPct: 0,
+      hpPct: 0,
+      isPeak: false
+    };
+  });
+
+  const maxTasksInWeek = Math.max(...daysData.map((d) => d.tasksCount), 0);
+  const maxHpInWeek = Math.max(...daysData.map((d) => d.hpCount), 0);
+
+  let peakIdx = -1;
+  let highestScore = 0;
+
+  daysData.forEach((d, idx) => {
+    const score = d.tasksCount * 1000 + d.hpCount;
+    if (score > highestScore && d.tasksCount > 0) {
+      highestScore = score;
+      peakIdx = idx;
+    }
+  });
+
+  return daysData.map((d, idx) => {
+    const isPeak = idx === peakIdx && d.tasksCount > 0;
+    const tasksPct = maxTasksInWeek > 0 ? Math.round((d.tasksCount / maxTasksInWeek) * 100) : 0;
+    const hpPct = maxHpInWeek > 0 ? Math.round((d.hpCount / maxHpInWeek) * 100) : 0;
+
+    return {
+      ...d,
+      tasksPct,
+      hpPct,
+      isPeak
+    };
+  });
+}
+
+import {
+  STORAGE_DOMAINS,
+  getUserScopedJSON,
+  setUserScopedJSON
+} from '../features/storage';
+
+export const STORAGE_KEY_USER_PROFILE_EXT = 'KAIROS_USER_PROFILE_EXT_V1';
+
+export interface UserProfileExtension {
+  customName?: string;
+  kairosId?: string;
+  userQuote?: string;
+  showcaseIds?: string[];
+}
 
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   userProfile,
@@ -197,12 +159,161 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   onOpenStats,
   onOpenAchievements
 }) => {
+  const progression = useProgression();
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+  const [qrModalTab, setQrModalTab] = useState<'my_code' | 'scan_code'>('scan_code');
+  const [isFlashlightOn, setIsFlashlightOn] = useState(false);
+  const [scanInputText, setScanInputText] = useState('');
+  const [scannedUserDetail, setScannedUserDetail] = useState<ConnectionUser | null>(null);
+  const [connectedUserIds, setConnectedUserIds] = useState<string[]>([]);
   const [isAchievementsModalOpen, setIsAchievementsModalOpen] = useState(false);
 
-  const [selectedDay, setSelectedDay] = useState<DailyCadenceData>(WEEKLY_CADENCE[3]); // Default to Thu (Peak)
+  const weeklyRhythm = useMemo(
+    () => calculateWeeklyRhythm(progression.rawState.taskHistory),
+    [progression.rawState.taskHistory]
+  );
+
+  const [selectedDayIndex, setSelectedDayIndex] = useState<number>(() => {
+    const todayDow = new Date().getDay(); // 0 is Sun
+    return todayDow === 0 ? 6 : todayDow - 1;
+  });
+
+  const selectedDay = weeklyRhythm[selectedDayIndex] || weeklyRhythm[0] || {
+    day: 'Mon',
+    tasksPct: 0,
+    tasksCount: 0,
+    hpPct: 0,
+    hpCount: 0
+  };
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [selectedAchievement, setSelectedAchievement] = useState<Achievement | null>(null);
+
+  // Profile Details & Customization State with User-Scoped Storage Persistence
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+
+  const [profileExt, setProfileExt] = useState<UserProfileExtension>(() => {
+    try {
+      const parsed = getUserScopedJSON<UserProfileExtension | null>(STORAGE_DOMAINS.PROFILE_EXTENSION, null);
+      if (parsed && typeof parsed === 'object') {
+        return parsed;
+      }
+    } catch {}
+    return {};
+  });
+
+  const [customName, setCustomName] = useState(profileExt.customName || userProfile?.name || 'Voyager');
+  const [kairosId, setKairosId] = useState(profileExt.kairosId || (userProfile?.email ? `@${userProfile.email.split('@')[0]}` : '@voyager.kairos'));
+  const [userQuote, setUserQuote] = useState(profileExt.userQuote || 'Focus on the opportune moment; flow where purpose meets time.');
+
+  const { achievements, stats } = useAchievementProgress(userProfile);
+
+  const unlockedAchievements = useMemo(() => {
+    return achievements.filter((a) => a.unlocked || a.isUnlocked);
+  }, [achievements]);
+
+  // Top 5 Showcased Achievement IDs (Customizable by the user for others to see)
+  const [showcaseIds, setShowcaseIds] = useState<string[]>(() => {
+    if (Array.isArray(profileExt.showcaseIds) && profileExt.showcaseIds.length > 0) {
+      return profileExt.showcaseIds;
+    }
+    const initialUnlocked = achievements.filter((a) => a.unlocked || a.isUnlocked);
+    return initialUnlocked.slice(0, 5).map((a) => a.id);
+  });
+
+  // Synchronize profile extension state whenever the active userProfile changes
+  useEffect(() => {
+    try {
+      const parsed = getUserScopedJSON<UserProfileExtension | null>(STORAGE_DOMAINS.PROFILE_EXTENSION, null);
+      const ext = parsed && typeof parsed === 'object' ? parsed : {};
+      setProfileExt(ext);
+      setCustomName(ext.customName || userProfile?.name || 'Voyager');
+      setKairosId(ext.kairosId || (userProfile?.email ? `@${userProfile.email.split('@')[0]}` : '@voyager.kairos'));
+      setUserQuote(ext.userQuote || 'Focus on the opportune moment; flow where purpose meets time.');
+      if (Array.isArray(ext.showcaseIds) && ext.showcaseIds.length > 0) {
+        setShowcaseIds(ext.showcaseIds);
+      } else {
+        const initialUnlocked = achievements.filter((a) => a.unlocked || a.isUnlocked);
+        setShowcaseIds(initialUnlocked.slice(0, 5).map((a) => a.id));
+      }
+    } catch {}
+  }, [userProfile]);
+
+  const [isCustomizeShowcaseOpen, setIsCustomizeShowcaseOpen] = useState(false);
+  const [tempShowcaseIds, setTempShowcaseIds] = useState<string[]>([]);
+
+  const saveProfileExtension = (updates: Partial<UserProfileExtension>) => {
+    const updated: UserProfileExtension = {
+      customName,
+      kairosId,
+      userQuote,
+      showcaseIds,
+      ...updates
+    };
+    setProfileExt(updated);
+    try {
+      setUserScopedJSON(STORAGE_DOMAINS.PROFILE_EXTENSION, updated);
+      syncQueue.enqueue(
+        'PROFILE_UPDATED',
+        syncSerializer.profileUpdated({
+          name: updated.customName || undefined,
+          handle: updated.kairosId || undefined,
+          quote: updated.userQuote || undefined
+        })
+      );
+    } catch {}
+  };
+
+  const showcasedAchievements = useMemo(() => {
+    const map = new Map(achievements.map((a) => [a.id, a]));
+    const list = showcaseIds
+      .map((id) => map.get(id))
+      .filter((a): a is Achievement => Boolean(a && (a.unlocked || a.isUnlocked)));
+    if (list.length > 0) return list;
+    return unlockedAchievements.slice(0, 5);
+  }, [showcaseIds, achievements, unlockedAchievements]);
+
+  const getRarityGradient2D = (rarity: AchievementRarity) => {
+    switch (rarity) {
+      case 'legendary':
+        return {
+          border: 'from-amber-300 via-yellow-400 to-amber-600',
+          bg: 'from-amber-500 to-yellow-600',
+          glow: 'rgba(234, 179, 8, 0.35)'
+        };
+      case 'epic':
+        return {
+          border: 'from-indigo-400 via-purple-500 to-violet-600',
+          bg: 'from-indigo-600 to-purple-700',
+          glow: 'rgba(99, 102, 241, 0.35)'
+        };
+      case 'rare':
+        return {
+          border: 'from-orange-400 via-amber-500 to-rose-500',
+          bg: 'from-orange-500 to-rose-600',
+          glow: 'rgba(249, 115, 22, 0.35)'
+        };
+      case 'mythic':
+        return {
+          border: 'from-pink-400 via-rose-500 to-cyan-400',
+          bg: 'from-rose-600 to-indigo-800',
+          glow: 'rgba(244, 63, 94, 0.35)'
+        };
+      default:
+        return {
+          border: 'from-slate-300 to-slate-400',
+          bg: 'from-slate-500 to-slate-600',
+          glow: 'rgba(148, 163, 184, 0.25)'
+        };
+    }
+  };
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 2800);
+  };
 
   const triggerHaptic = (style: ImpactStyle = ImpactStyle.Light) => {
     try {
@@ -248,6 +359,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
   const handleOpenQr = () => {
     triggerHaptic(ImpactStyle.Medium);
+    setQrModalTab('scan_code');
     setIsQrModalOpen(true);
   };
 
@@ -256,10 +368,37 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     setIsQrModalOpen(false);
   };
 
+  const handleScanUser = (queryOrHandle: string) => {
+    if (!queryOrHandle.trim()) return;
+    triggerHaptic(ImpactStyle.Medium);
+    const target = resolveScannedUserProfile(queryOrHandle);
+    setIsQrModalOpen(false);
+    setScanInputText('');
+    setScannedUserDetail(target);
+    showToast(`📷 QR Code Decoded: Viewing @${target.username}'s Profile`);
+  };
+
+  const handleConnectScannedUser = (user: ConnectionUser) => {
+    triggerHaptic(ImpactStyle.Medium);
+    if (!connectedUserIds.includes(user.id)) {
+      setConnectedUserIds((prev) => [...prev, user.id]);
+      showToast(`🎉 Connected with ${user.name}! +50 XP Unlocked`);
+    } else {
+      showToast(`Already connected with ${user.name}`);
+    }
+  };
+
   const handleCopyLink = () => {
     triggerHaptic(ImpactStyle.Medium);
-    navigator.clipboard?.writeText('https://kairos.app/u/alex.kairos');
+    const origin =
+      typeof window !== 'undefined' && window.location.origin
+        ? window.location.origin
+        : 'http://localhost:3000';
+    const cleanHandle = (kairosId || 'alex.kairos').replace(/^@/, '');
+    const profileUrl = `${origin}/?profile=${encodeURIComponent(cleanHandle)}`;
+    navigator.clipboard?.writeText(profileUrl);
     setCopyFeedback(true);
+    showToast(`📋 Copied profile link: ${profileUrl}`);
     setTimeout(() => {
       setCopyFeedback(false);
     }, 2000);
@@ -267,12 +406,18 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
   const handleShareCode = async () => {
     triggerHaptic(ImpactStyle.Medium);
+    const origin =
+      typeof window !== 'undefined' && window.location.origin
+        ? window.location.origin
+        : 'http://localhost:3000';
+    const cleanHandle = (kairosId || 'alex.kairos').replace(/^@/, '');
+    const profileUrl = `${origin}/?profile=${encodeURIComponent(cleanHandle)}`;
     if (navigator.share) {
       try {
         await navigator.share({
-          title: 'Connect with Alex Rivera on Kairos',
-          text: 'Scan or follow my Kairos neural profile @alex.kairos to sync study cadences and squad challenges!',
-          url: 'https://kairos.app/u/alex.kairos'
+          title: `Connect with ${customName} on Kairos`,
+          text: `Scan or follow my Kairos neural profile ${kairosId} to sync study routines and squad challenges!`,
+          url: profileUrl
         });
       } catch {
         // user dismissed share
@@ -282,116 +427,260 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     }
   };
 
-  const handleDaySelect = (dayData: DailyCadenceData) => {
+  const handleDaySelect = (dayData: DailyRhythmData, index: number) => {
     triggerHaptic(ImpactStyle.Light);
-    setSelectedDay(dayData);
+    setSelectedDayIndex(index);
   };
 
-  const displayName = userProfile?.name || 'Alex Rivera';
+  const displayName = userProfile?.name || 'Voyager';
 
   return (
-    <div className="w-full h-full bg-surface text-on-surface font-body-md min-h-screen flex flex-col selection:bg-primary-fixed selection:text-on-primary-fixed antialiased relative overflow-hidden">
-      {/* Fixed Frosted Glass Top Header */}
-      <header className="fixed top-0 inset-x-0 z-40 bg-surface/85 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.03)] pt-safe">
-        <div className="h-16 px-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div
-              className="w-8 h-8 rounded-full flex items-center justify-center text-white font-serif font-bold text-sm shadow-md shrink-0 relative overflow-hidden"
-              style={{
-                background:
-                  'radial-gradient(circle at 35% 35%, rgb(112, 166, 255) 0%, rgb(168, 85, 247) 50%, rgb(236, 72, 153) 100%)',
-                boxShadow: 'rgba(168, 85, 247, 0.45) 0px 0px 12px'
-              }}
-            >
-              <span className="relative z-10 select-none">K</span>
-              <div className="absolute inset-0 bg-white/10 mix-blend-overlay" />
-            </div>
-            <div className="flex flex-col">
-              <div className="flex items-center gap-1">
-                <span className="font-headline-sm text-headline-sm tracking-tight text-on-surface font-bold">
-                  Kairos
-                </span>
-              </div>
-              <span className="font-label-sm text-label-sm text-on-surface-variant">Profile</span>
-            </div>
-          </div>
-
-          <button
-            aria-label="Settings"
-            onClick={handleOpenSettings}
-            className="w-10 h-10 rounded-full flex items-center justify-center bg-surface-container-low hover:bg-surface-container-high text-on-surface transition-colors active:scale-95 cursor-pointer border-none"
-            type="button"
-          >
-            <span className="material-symbols-outlined text-headline-sm">settings</span>
-          </button>
-        </div>
-      </header>
+    <div className="w-full h-full bg-surface text-on-surface font-body-md flex flex-col selection:bg-primary-fixed selection:text-on-primary-fixed antialiased relative overflow-hidden animate-fade-in">
+      {/* Top Header App Bar (Left: Splash Orb + Title/Subtitle; Right: Settings icon only) */}
+      <AppTopBar
+        subtitle="Evolution Profile"
+        rightActionIcon="settings"
+        rightActionLabel="Settings"
+        onRightActionClick={handleOpenSettings}
+      />
 
       {/* Main Scrollable Content */}
-      <main className="flex-1 flex flex-col relative w-full px-3.5 pt-20 pb-36 bg-surface overflow-y-auto mobile-scroll">
+      <main className="flex-1 flex flex-col relative w-full px-4 pt-3 pb-28 bg-surface overflow-y-auto mobile-scroll">
         <div className="flex flex-col w-full gap-3.5 max-w-[420px] mx-auto">
-          {/* Top Identity & Progression Showcase */}
-          <section className="relative overflow-hidden rounded-3xl bg-surface-container-lowest shadow-[0_12px_36px_-6px_rgba(79,70,229,0.12)] p-4 border border-surface-container-high/40">
+          {/* Top Identity & Progression Showcase (Instagram Profile Style) */}
+          <section className="relative overflow-hidden rounded-3xl bg-surface-container-lowest shadow-[0_12px_36px_-6px_rgba(79,70,229,0.10)] p-4 border border-surface-container-high/40 space-y-3.5">
             <div className="absolute -right-12 -top-12 w-44 h-44 rounded-full bg-secondary-container/20 blur-2xl pointer-events-none" />
             <div className="absolute -left-12 bottom-0 w-36 h-36 rounded-full bg-primary-fixed/30 blur-2xl pointer-events-none" />
 
-            {/* User Info Row */}
-            <div className="relative flex items-center justify-between gap-2.5">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="relative shrink-0">
-                  <img
-                    alt="Alex Rivera portrait"
-                    className="w-14 h-14 rounded-full object-cover shadow-[0_4px_16px_rgba(53,37,205,0.2)] ring-2 ring-primary/20"
-                    src="https://lh3.googleusercontent.com/aida-public/AB6AXuApyzwKOIPyLa7oDHcQJE3EuKbjR1GAcBM067yYwql352SWV6rEONTW-rXwQA7LF21Oy_2aW49EPGk5qkufisfpv4RKja21xmC4JkEDfZHn416oYqbj0jn7trFhQZUgnWmMRrGibDl-xoTEZBDxs5XENzIG5-Qz9GqnLV1gk_il0keyzXJn7kqxpNqV_ihDVkcsoyaCUW80cJj28dyFp1AvcRW0OIM8AscQiN-8SzIAUxL0xigvSm5OEw"
-                  />
-                  <span className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-surface-container-lowest flex items-center justify-center shadow-sm">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                  </span>
+            {/* Top Identity Row: Avatar on Left + (Name ABOVE Stats) on Right */}
+            <div className="relative flex items-center justify-between gap-4">
+              {/* Profile Avatar */}
+              <div className="relative shrink-0">
+                <div className="p-[2.5px] rounded-full bg-gradient-to-tr from-[#f09433] via-[#e6683c] via-[#dc2743] via-[#cc2366] to-[#bc1888] shadow-md">
+                  <div className="p-[2px] rounded-full bg-surface-container-lowest">
+                    <img
+                      alt="Profile avatar"
+                      className="w-16 h-16 rounded-full object-cover"
+                      src="https://lh3.googleusercontent.com/aida-public/AB6AXuApyzwKOIPyLa7oDHcQJE3EuKbjR1GAcBM067yYwql352SWV6rEONTW-rXwQA7LF21Oy_2aW49EPGk5qkufisfpv4RKja21xmC4JkEDfZHn416oYqbj0jn7trFhQZUgnWmMRrGibDl-xoTEZBDxs5XENzIG5-Qz9GqnLV1gk_il0keyzXJn7kqxpNqV_ihDVkcsoyaCUW80cJj28dyFp1AvcRW0OIM8AscQiN-8SzIAUxL0xigvSm5OEw"
+                    />
+                  </div>
                 </div>
-                <div className="flex flex-col min-w-0">
+                {/* Plus / Active status badge on avatar */}
+                <div
+                  onClick={() => showToast('✨ Story active: 3 Focus sessions logged today')}
+                  className="absolute bottom-0 right-0 w-5 h-5 rounded-full bg-primary text-white flex items-center justify-center ring-2 ring-surface-container-lowest shadow-sm cursor-pointer active:scale-90 transition-transform"
+                >
+                  <span className="material-symbols-outlined text-[12px] font-bold">add</span>
+                </div>
+              </div>
+
+              {/* Right Column: Name displayed ABOVE Connections, Tasks and HP */}
+              <div className="flex-1 flex flex-col justify-center min-w-0">
+                {/* User Name & Kairos ID */}
+                <div className="flex flex-col pb-1.5">
                   <div className="flex items-center gap-1.5">
-                    <h1 className="font-headline-sm text-headline-sm font-bold text-on-surface tracking-tight leading-snug truncate">
-                      {displayName}
+                    <h1 className="text-base font-bold text-on-surface tracking-tight truncate">
+                      {customName}
                     </h1>
                     <span
-                      className="material-symbols-outlined text-primary text-base shrink-0"
+                      className="material-symbols-outlined text-blue-500 text-[17px] shrink-0 drop-shadow-2xs"
                       style={{ fontVariationSettings: "'FILL' 1" }}
+                      title="Verified Scholar"
                     >
                       verified
                     </span>
                   </div>
-                  <span className="font-label-sm text-label-sm font-semibold text-primary">
-                    @alex.kairos
+                  <span className="text-[11px] text-on-surface-variant font-medium tracking-tight">
+                    {kairosId.startsWith('@') ? kairosId : `@${kairosId}`}
                   </span>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                    <span className="px-2 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed font-label-sm text-[11px] font-bold tracking-wide uppercase">
-                      Lvl 14 • Luminary
+                </div>
+
+                {/* 3 Stats Columns: Connections | Tasks | HP */}
+                <div className="flex items-center justify-around text-center">
+                  <div
+                    onClick={() => onNavigateTab && onNavigateTab('connections')}
+                    className="flex flex-col cursor-pointer active:scale-95 transition-transform"
+                  >
+                    <span className="text-base font-extrabold text-on-surface tracking-tight leading-tight">
+                      48
                     </span>
-                    <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary-fixed/50 text-secondary font-label-sm text-[11px] font-semibold">
-                      <span className="material-symbols-outlined text-xs">group</span>
-                      <span>42 Friends</span>
-                    </div>
+                    <span className="text-[11px] text-on-surface-variant font-medium">
+                      Connections
+                    </span>
+                  </div>
+
+                  <div
+                    onClick={() => onNavigateTab && onNavigateTab('tasks')}
+                    className="flex flex-col cursor-pointer active:scale-95 transition-transform"
+                  >
+                    <span className="text-base font-extrabold text-on-surface tracking-tight leading-tight">
+                      {progression.rawState.taskHistory.length}
+                    </span>
+                    <span className="text-[11px] text-on-surface-variant font-medium">
+                      Tasks
+                    </span>
+                  </div>
+
+                  <div
+                    onClick={() => onNavigateTab && onNavigateTab('statistics')}
+                    className="flex flex-col cursor-pointer active:scale-95 transition-transform"
+                  >
+                    <span className="text-base font-extrabold text-primary tracking-tight leading-tight">
+                      {progression.lifetimeHP.toLocaleString()}
+                    </span>
+                    <span className="text-[11px] text-on-surface-variant font-medium">
+                      HP
+                    </span>
                   </div>
                 </div>
               </div>
+            </div>
 
-              {/* Tactile QR Code Action Button */}
+            {/* Level Title & Achievements Info Strip (Above Quote) */}
+            <div className="flex items-center justify-between gap-2 px-1 pt-0.5">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-on-surface">
+                <span
+                  className="material-symbols-outlined text-primary text-[15px]"
+                  style={{ fontVariationSettings: "'FILL' 1" }}
+                >
+                  bolt
+                </span>
+                <span>Level {progression.level}</span>
+                <span className="text-on-surface-variant font-normal">•</span>
+                <span className="text-primary font-semibold">{progression.levelTitle}</span>
+              </div>
+
+              <div
+                onClick={() => {
+                  triggerHaptic(ImpactStyle.Light);
+                  if (onOpenAchievements) {
+                    onOpenAchievements();
+                  } else {
+                    setIsAchievementsModalOpen(true);
+                  }
+                }}
+                className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-primary-fixed/40 text-primary font-bold text-[11px] cursor-pointer hover:bg-primary-fixed transition-colors active:scale-95 shadow-2xs"
+                title="View All Achievements"
+              >
+                <span
+                  className="material-symbols-outlined text-[14px]"
+                  style={{ fontVariationSettings: "'FILL' 1" }}
+                >
+                  military_tech
+                </span>
+                <span>{stats.unlocked} / {stats.total} Owned</span>
+              </div>
+            </div>
+
+            {/* Below Profile Photo: Quote Section */}
+            <div className="relative p-3 rounded-2xl bg-surface-container-low/80 border border-surface-container-high/60 shadow-2xs">
+              <div className="flex items-start gap-2">
+                <span className="material-symbols-outlined text-primary text-[18px] shrink-0 mt-0.5 opacity-80">
+                  format_quote
+                </span>
+                <p className="text-xs italic text-on-surface font-medium leading-relaxed">
+                  "{userQuote}"
+                </p>
+              </div>
+            </div>
+
+            {/* Instagram Action Buttons Row (Edit Profile | Share Profile | QR Code) */}
+            <div className="flex items-center gap-2 pt-1">
               <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic(ImpactStyle.Light);
+                  setTempShowcaseIds([...showcaseIds]);
+                  setIsEditModalOpen(true);
+                }}
+                className="flex-1 py-1.5 px-3 rounded-xl bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-semibold text-xs border border-outline-variant/30 text-center active:scale-[0.98] transition-all cursor-pointer shadow-2xs"
+              >
+                Edit Profile
+              </button>
+              <button
+                type="button"
+                onClick={handleShareCode}
+                className="flex-1 py-1.5 px-3 rounded-xl bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-semibold text-xs border border-outline-variant/30 text-center active:scale-[0.98] transition-all cursor-pointer shadow-2xs"
+              >
+                Share Profile
+              </button>
+              <button
+                type="button"
                 id="qr-button"
                 onClick={handleOpenQr}
-                aria-label="Kairos QR Code"
-                className="flex flex-col items-center justify-center gap-0.5 px-3 py-2 rounded-2xl bg-surface-container text-primary hover:bg-surface-container-high transition-all active:scale-95 shadow-sm shrink-0 border-none cursor-pointer"
-                type="button"
+                title="View QR Code"
+                className="w-8 h-8 rounded-xl bg-surface-container-high hover:bg-surface-container-highest text-primary border border-outline-variant/30 flex items-center justify-center active:scale-95 transition-all cursor-pointer shrink-0 shadow-2xs"
               >
-                <span className="material-symbols-outlined text-headline-sm">qr_code_2</span>
-                <span className="font-label-sm text-[11px] font-bold tracking-wide uppercase">
-                  QR
-                </span>
+                <span className="material-symbols-outlined text-[18px]">qr_code_2</span>
               </button>
             </div>
 
-            {/* Compact Level Progression */}
-            <div className="mt-3 p-2.5 rounded-2xl bg-surface-container-low/70 flex flex-col gap-1.5 border border-surface-container-high/40">
+            {/* Top 5 Achievements Showcase in 2D (Replaces Story Highlights) */}
+            <div className="pt-2.5 border-t border-surface-container-high/40 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-on-surface flex items-center gap-1">
+                    <span
+                      className="material-symbols-outlined text-primary text-[16px]"
+                      style={{ fontVariationSettings: "'FILL' 1" }}
+                    >
+                      military_tech
+                    </span>
+                    Showcase Badges
+                  </span>
+                  <span className="text-[10px] text-on-surface-variant font-medium">
+                    (Top {showcasedAchievements.length} visible to others)
+                  </span>
+                </div>
+              </div>
+
+              {/* 2D Badges Horizontal Tray */}
+              <div className="flex items-center gap-3 overflow-x-auto pb-1.5 pt-0.5 mobile-scroll no-scrollbar">
+                {showcasedAchievements.map((ach) => {
+                  const gradient = getRarityGradient2D(ach.rarity);
+                  return (
+                    <div
+                      key={ach.id}
+                      onClick={() => {
+                        triggerHaptic(ImpactStyle.Light);
+                        setSelectedAchievement(ach);
+                      }}
+                      className="flex flex-col items-center gap-1 cursor-pointer shrink-0 active:scale-95 transition-transform group"
+                    >
+                      {/* 2D Badge Container with Metallic Rarity Border */}
+                      <div
+                        className={`p-[2.5px] rounded-2xl bg-gradient-to-tr ${gradient.border} shadow-sm group-hover:shadow-md transition-shadow`}
+                        style={{ filter: `drop-shadow(0 2px 6px ${gradient.glow})` }}
+                      >
+                        <div
+                          className={`w-12 h-12 rounded-[13px] bg-gradient-to-b ${gradient.bg} flex items-center justify-center p-1.5 relative overflow-hidden`}
+                        >
+                          {/* 2D Inner Ambient Sheen */}
+                          <div className="absolute inset-0 bg-gradient-to-b from-white/25 via-transparent to-black/15 pointer-events-none" />
+                          <span
+                            className="material-symbols-outlined text-[24px] text-white drop-shadow-md z-10"
+                            style={{ fontVariationSettings: "'FILL' 1" }}
+                          >
+                            {ach.icon}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-bold text-on-surface truncate max-w-[64px] text-center leading-tight">
+                        {ach.title}
+                      </span>
+                      <span
+                        className={`text-[8px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded-full ${ach.badgePillBg}`}
+                      >
+                        {ach.rarity}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Compact Level Progression Bar */}
+            <div className="mt-1 p-2.5 rounded-2xl bg-surface-container-low/70 flex flex-col gap-1.5 border border-surface-container-high/40">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-label-sm text-xs text-on-surface font-semibold flex items-center gap-1">
                   <span
@@ -403,18 +692,22 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                   Level Progression
                 </span>
                 <span className="font-label-sm text-xs text-primary font-bold">
-                  8,420 <span className="text-on-surface-variant font-normal">/ 10,000 XP</span>
+                  {progression.xpIntoCurrentLevel.toLocaleString()} <span className="text-on-surface-variant font-normal">/ {progression.nextLevelTargetXP > progression.currentLevelFloorXP ? (progression.nextLevelTargetXP - progression.currentLevelFloorXP).toLocaleString() : 'MAX'} XP</span>
                 </span>
               </div>
               <div className="w-full h-2 rounded-full bg-surface-container-highest overflow-hidden p-0.5">
                 <div
                   className="h-full rounded-full bg-gradient-to-r from-primary to-secondary-container transition-all duration-700 shadow-sm"
-                  style={{ width: '84.2%' }}
+                  style={{ width: `${progression.progressPercent}%` }}
                 />
               </div>
               <div className="flex justify-between items-center text-on-surface-variant font-label-sm text-[11px]">
-                <span>Vanguard Synthesizer</span>
-                <span className="text-primary font-semibold">1,580 XP to Lvl 15</span>
+                <span>{progression.levelTitle}</span>
+                <span className="text-primary font-semibold">
+                  {progression.nextLevelTargetXP > progression.currentLevelFloorXP
+                    ? `${progression.xpNeededForNextLevel.toLocaleString()} XP to Lvl ${progression.nextLevel}`
+                    : 'Pinnacle Level Reached'}
+                </span>
               </div>
             </div>
           </section>
@@ -463,47 +756,77 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             </div>
 
             {/* Horizontal Scroll Cards */}
-            <div className="flex gap-2.5 overflow-x-auto pb-1.5 pt-1 -mx-1 px-1 mobile-scroll no-scrollbar">
-              {ACHIEVEMENTS_DATA.slice(0, 5).map((ach) => (
-                <div
-                  key={ach.id}
-                  onClick={() => {
-                    triggerHaptic(ImpactStyle.Light);
-                    setSelectedAchievement(ach);
-                  }}
-                  className="flex-shrink-0 w-44 p-3 rounded-2xl bg-surface-container-low/70 hover:bg-surface-container-low transition-all cursor-pointer flex flex-col justify-between gap-2 shadow-[0_1px_8px_rgba(0,0,0,0.03)] active:scale-95 border border-surface-container-high/40"
-                >
-                  <div className="flex items-start justify-between">
+            <div className="flex gap-3 overflow-x-auto pb-2 pt-1 -mx-1 px-1 mobile-scroll no-scrollbar">
+              {unlockedAchievements.slice(0, 5).map((ach) => {
+                const xpReward = calculateAchievementXpReward(ach.rarity, progression.level);
+                const pillStyle = getRarityPillStyle(ach.rarity);
+                const title = ach.title || ach.name;
+                return (
+                  <div
+                    key={ach.id}
+                    onClick={() => {
+                      triggerHaptic(ImpactStyle.Light);
+                      setSelectedAchievement(ach);
+                    }}
+                    className="flex-shrink-0 w-48 p-3 rounded-2xl bg-surface-container-low/80 hover:bg-surface-container-low transition-all cursor-pointer flex flex-col justify-between gap-2 shadow-[0_4px_16px_rgba(0,0,0,0.04)] active:scale-95 border border-surface-container-high/50 group relative overflow-hidden"
+                  >
+                    {/* Ambient Metallic Glow */}
                     <div
-                      className={`w-9 h-9 rounded-xl ${ach.badgeBg} flex items-center justify-center ${ach.badgeText} shadow-sm`}
-                    >
+                      className="absolute -top-6 -right-6 w-24 h-24 rounded-full blur-2xl opacity-20 pointer-events-none group-hover:opacity-35 transition-opacity"
+                      style={{ backgroundColor: ach.glowColor }}
+                    />
+
+                    {/* Top Row: Rarity Pill & Reward */}
+                    <div className="flex items-center justify-between z-10">
                       <span
-                        className="material-symbols-outlined text-headline-sm"
-                        style={{ fontVariationSettings: "'FILL' 1" }}
+                        className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${pillStyle}`}
                       >
-                        {ach.icon}
+                        {ach.rarity}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-primary-fixed/50 text-primary font-mono text-[10px] font-bold">
+                        +{xpReward} XP
                       </span>
                     </div>
-                    <span
-                      className={`px-2 py-0.5 rounded-full ${ach.badgePillBg} ${ach.badgePillText} font-label-sm text-label-sm font-bold`}
-                    >
-                      +{ach.hpReward} HP
-                    </span>
+
+                    {/* Frontview Medal Display */}
+                    <div className="my-1 relative flex items-center justify-center h-24 w-full z-10 transition-transform duration-300 group-hover:scale-105">
+                      <CardBadgePreview
+                        id={ach.id}
+                        name={title}
+                        rarity={ach.rarity}
+                        modelType={ach.modelType}
+                        category={ach.category}
+                        glowColor={ach.glowColor}
+                        currentProgress={100}
+                        targetProgress={100}
+                        unlocked={true}
+                        className="w-full h-full"
+                      />
+                    </div>
+
+                    {/* Title and Description */}
+                    <div className="z-10">
+                      <h3 className="font-label-lg text-xs font-extrabold text-on-surface leading-snug group-hover:text-primary transition-colors line-clamp-1">
+                        {title}
+                      </h3>
+                      <p className="font-body-sm text-[10px] text-on-surface-variant mt-0.5 line-clamp-2 leading-tight">
+                        {ach.description}
+                      </p>
+                    </div>
+
+                    {/* Verified Unlocked Footer */}
+                    <div className="flex items-center justify-between pt-1 border-t border-surface-container-high/40 text-emerald-600 font-label-sm text-[10px] font-bold z-10">
+                      <div className="flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[13px]">verified</span>
+                        <span>Unlocked</span>
+                      </div>
+                      <span className="text-on-surface-variant font-medium text-[9px]">
+                        {ach.unlockDate || 'Achieved'}
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="font-label-lg text-label-lg font-bold text-on-surface leading-snug">
-                      {ach.title}
-                    </h3>
-                    <p className="font-body-sm text-xs text-on-surface-variant mt-0.5 line-clamp-2 leading-tight">
-                      {ach.description}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1 pt-1 text-primary font-label-sm text-xs font-semibold">
-                    <span className="material-symbols-outlined text-xs">verified</span>
-                    <span>Completed</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
 
@@ -610,7 +933,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                       Activity &amp; Performance
                     </h2>
                     <span className="font-body-sm text-[11px] text-on-surface-variant truncate block">
-                      Core statistics &amp; cadence
+                      Core statistics &amp; rhythm
                     </span>
                   </div>
                 </div>
@@ -636,7 +959,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                     </span>
                   </div>
                   <span className="font-metric-numeral text-headline-sm text-on-surface font-extrabold leading-tight">
-                    420
+                    {progression.rawState.taskHistory.length}
                   </span>
                   <span className="font-label-sm text-label-sm text-on-surface-variant">Tasks Done</span>
                 </div>
@@ -650,7 +973,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                     </span>
                   </div>
                   <span className="font-metric-numeral text-headline-sm text-on-surface font-extrabold leading-tight">
-                    3,850
+                    {progression.lifetimeHP.toLocaleString()}
                   </span>
                   <span className="font-label-sm text-label-sm text-on-surface-variant">Lifetime HP</span>
                 </div>
@@ -664,17 +987,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                     </span>
                   </div>
                   <span className="font-metric-numeral text-headline-sm text-on-surface font-extrabold leading-tight">
-                    18d
+                    {progression.currentStreak}d
                   </span>
-                  <span className="font-label-sm text-label-sm text-on-surface-variant">Best Streak</span>
+                  <span className="font-label-sm text-label-sm text-on-surface-variant">Current Streak</span>
                 </div>
               </div>
 
-              {/* Weekly Cadence Header & Dual Bar Chart */}
+              {/* Weekly Flow Header & Dual Bar Chart */}
               <div className="flex items-center justify-between mb-2 pt-1 border-t border-surface-container-high/30">
                 <div className="flex flex-col">
                   <span className="font-headline-sm text-sm font-bold text-on-surface block">
-                    Weekly Cadence
+                    Weekly Flow
                   </span>
                   <span className="font-body-sm text-xs text-on-surface-variant">
                     Dual Metric: Tasks &amp; Energy Yield
@@ -694,12 +1017,12 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
               {/* Interactive Dual Bar Chart */}
               <div className="pt-4 pb-2 px-1 flex justify-between items-end h-44 gap-1.5" id="weekly-chart">
-                {WEEKLY_CADENCE.map((item) => {
+                {weeklyRhythm.map((item, idx) => {
                   const isSelected = selectedDay.day === item.day;
                   return (
                     <div
                       key={item.day}
-                      onClick={() => handleDaySelect(item)}
+                      onClick={() => handleDaySelect(item, idx)}
                       className={`flex-1 flex flex-col items-center gap-1.5 h-full justify-end cursor-pointer group transition-all duration-200 ${
                         isSelected ? 'scale-105' : 'hover:opacity-90'
                       }`}
@@ -759,13 +1082,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                   <span className="material-symbols-outlined text-primary text-body-lg">insights</span>
                   <span className="font-body-sm text-body-sm text-on-surface">
                     <span className="font-semibold text-primary">
-                      {selectedDay.day === 'Thu' ? 'Thursday' : `${selectedDay.day}day`}
+                      {DAY_FULL_NAMES[selectedDay.day] || selectedDay.day}
                     </span>{' '}
                     delivered {selectedDay.tasksCount} completed tasks &amp; {selectedDay.hpCount} HP.
                   </span>
                 </div>
                 <span className="font-label-sm text-label-sm text-secondary font-bold">
-                  {selectedDay.day === 'Thu' ? '+24% avg' : 'Logged'}
+                  {selectedDay.isPeak ? 'Peak Day' : selectedDay.tasksCount > 0 ? 'Logged' : '0 recorded'}
                 </span>
               </div>
             </div>
@@ -773,64 +1096,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         </div>
       </main>
 
-      {/* Floating Bottom Navigation Dock */}
-      <nav
-        className="fixed bottom-4 inset-x-0 z-50 flex justify-center px-4 pointer-events-none pb-safe"
-        data-active-classes="bg-gradient-to-tr from-primary to-primary-container text-on-primary shadow-[0_8px_20px_-2px_rgba(79,70,229,0.38)]"
-      >
-        <div className="pointer-events-auto flex items-center justify-between w-full max-w-[390px] h-16 px-2.5 rounded-full bg-surface-container-lowest/90 backdrop-blur-2xl shadow-[0_16px_40px_-6px_rgba(19,27,46,0.12),0_2px_12px_rgba(53,37,205,0.06)] border border-surface-container-high/60">
-          {/* Home */}
-          <button
-            onClick={() => handleTabClick('home')}
-            aria-label="Home Dashboard"
-            className="relative min-w-[44px] min-h-[44px] w-12 h-12 flex items-center justify-center rounded-full text-on-surface-variant transition-all duration-300 hover:text-on-surface active:scale-95 cursor-pointer border-none bg-transparent"
-            type="button"
-          >
-            <span className="material-symbols-outlined text-headline-sm">home</span>
-          </button>
 
-          {/* Daily Tasks */}
-          <button
-            onClick={() => handleTabClick('tasks')}
-            aria-label="Daily Cadence Tasks"
-            className="relative min-w-[44px] min-h-[44px] w-12 h-12 flex items-center justify-center rounded-full text-on-surface-variant transition-all duration-300 hover:text-on-surface active:scale-95 cursor-pointer border-none bg-transparent"
-            type="button"
-          >
-            <span className="material-symbols-outlined text-headline-sm">check_circle</span>
-            <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-secondary ring-2 ring-surface-container-lowest" />
-          </button>
-
-          {/* AI Companion */}
-          <button
-            onClick={() => handleTabClick('companion')}
-            aria-label="Kairos AI Companion Chat"
-            className="relative min-w-[44px] min-h-[44px] w-12 h-12 flex items-center justify-center rounded-full text-on-surface-variant transition-all duration-300 hover:text-on-surface active:scale-95 cursor-pointer border-none bg-transparent"
-            type="button"
-          >
-            <span className="material-symbols-outlined text-headline-sm">auto_awesome</span>
-          </button>
-
-          {/* Squad Progression */}
-          <button
-            onClick={() => handleTabClick('squad')}
-            aria-label="Squad League & Challenges"
-            className="relative min-w-[44px] min-h-[44px] w-12 h-12 flex items-center justify-center rounded-full text-on-surface-variant transition-all duration-300 hover:text-on-surface active:scale-95 cursor-pointer border-none bg-transparent"
-            type="button"
-          >
-            <span className="material-symbols-outlined text-headline-sm">groups</span>
-          </button>
-
-          {/* Profile Active */}
-          <button
-            aria-current="page"
-            aria-label="Evolution Profile"
-            className="relative min-w-[44px] min-h-[44px] w-12 h-12 flex items-center justify-center rounded-full bg-gradient-to-tr from-primary to-primary-container text-on-primary shadow-[0_8px_20px_-2px_rgba(79,70,229,0.38)] transition-all duration-300 active:scale-95 cursor-pointer border-none"
-            type="button"
-          >
-            <span className="material-symbols-outlined text-headline-sm">person</span>
-          </button>
-        </div>
-      </nav>
 
       {/* ========================================================================= */}
       {/* KAIROS QR MODAL (#kairos-qr-modal) */}
@@ -866,7 +1132,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                     My Kairos Code
                   </span>
                   <span className="font-label-sm text-xs text-primary font-semibold">
-                    @alex.kairos
+                    {kairosId || (userProfile?.email ? `@${userProfile.email.split('@')[0]}` : '@voyager.kairos')}
                   </span>
                 </div>
               </div>
@@ -944,7 +1210,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
             <div className="flex items-center gap-2 mb-1">
               <img
-                alt="Alex Rivera avatar"
+                alt={`${displayName} avatar`}
                 className="w-7 h-7 rounded-full object-cover ring-2 ring-primary/20"
                 src="https://lh3.googleusercontent.com/aida-public/AB6AXuApyzwKOIPyLa7oDHcQJE3EuKbjR1GAcBM067yYwql352SWV6rEONTW-rXwQA7LF21Oy_2aW49EPGk5qkufisfpv4RKja21xmC4JkEDfZHn416oYqbj0jn7trFhQZUgnWmMRrGibDl-xoTEZBDxs5XENzIG5-Qz9GqnLV1gk_il0keyzXJn7kqxpNqV_ihDVkcsoyaCUW80cJj28dyFp1AvcRW0OIM8AscQiN-8SzIAUxL0xigvSm5OEw"
               />
@@ -1001,7 +1267,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                 </div>
                 <div>
                   <h3 className="font-headline-sm text-base font-bold text-on-surface">All Achievements</h3>
-                  <span className="font-label-sm text-xs text-on-surface-variant">5 of 18 Milestones Earned</span>
+                  <span className="font-label-sm text-xs text-on-surface-variant">{stats.unlocked} of {stats.total} Milestones Earned</span>
                 </div>
               </div>
               <button
@@ -1014,73 +1280,447 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             </div>
 
             <div className="flex-1 overflow-y-auto pt-3 space-y-3 mobile-scroll">
-              {ACHIEVEMENTS_DATA.map((ach) => (
-                <div
-                  key={ach.id}
-                  className={`p-3 rounded-2xl border transition-all flex items-start gap-3 ${
-                    ach.isUnlocked
-                      ? 'bg-surface-container-low/70 border-surface-container-high/60 shadow-xs'
-                      : 'bg-surface-container-lowest/50 border-surface-container-high/30 opacity-70'
-                  }`}
-                >
+              {achievements.map((ach) => {
+                const isUnlocked = Boolean(ach.unlocked || ach.isUnlocked);
+                const xpReward = calculateAchievementXpReward(ach.rarity, progression.level);
+                const title = ach.title || ach.name;
+                return (
                   <div
-                    className={`w-10 h-10 rounded-xl ${ach.badgeBg} flex items-center justify-center ${ach.badgeText} shrink-0 shadow-xs`}
+                    key={ach.id}
+                    onClick={() => {
+                      triggerHaptic(ImpactStyle.Light);
+                      setSelectedAchievement(ach);
+                    }}
+                    className={`p-3 rounded-2xl border transition-all flex items-center gap-3 cursor-pointer ${
+                      isUnlocked
+                        ? 'bg-surface-container-low/70 border-surface-container-high/60 shadow-xs'
+                        : 'bg-surface-container-lowest/50 border-surface-container-high/30 opacity-70'
+                    }`}
                   >
-                    <span
-                      className="material-symbols-outlined text-xl"
-                      style={{ fontVariationSettings: ach.isUnlocked ? "'FILL' 1" : "'FILL' 0" }}
-                    >
-                      {ach.icon}
-                    </span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-1">
-                      <h4 className="font-label-lg text-sm font-bold text-on-surface truncate">
-                        {ach.title}
-                      </h4>
-                      <span className="px-2 py-0.5 rounded-full bg-primary-fixed/30 text-primary font-label-sm text-[10px] font-bold shrink-0">
-                        +{ach.hpReward} HP
-                      </span>
+                    <div className="w-12 h-12 shrink-0 flex items-center justify-center">
+                      <CardBadgePreview
+                        id={ach.id}
+                        name={title}
+                        rarity={ach.rarity}
+                        modelType={ach.modelType}
+                        category={ach.category}
+                        glowColor={ach.glowColor}
+                        currentProgress={isUnlocked ? 100 : ach.currentProgress}
+                        targetProgress={isUnlocked ? 100 : (ach.targetProgress || 100)}
+                        unlocked={isUnlocked}
+                        className="w-full h-full"
+                      />
                     </div>
-                    <p className="font-body-sm text-xs text-on-surface-variant mt-0.5">
-                      {ach.description}
-                    </p>
-                    {ach.isUnlocked ? (
-                      <div className="flex items-center gap-1 mt-1 text-emerald-600 font-label-sm text-[11px] font-semibold">
-                        <span className="material-symbols-outlined text-xs">verified</span>
-                        <span>Unlocked • {ach.unlockedDate}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-1">
+                        <h4 className="font-label-lg text-sm font-bold text-on-surface truncate">
+                          {title}
+                        </h4>
+                        <span className="px-2 py-0.5 rounded-full bg-primary-fixed/30 text-primary font-label-sm text-[10px] font-bold shrink-0">
+                          +{xpReward} XP
+                        </span>
                       </div>
-                    ) : (
-                      ach.progress && (
-                        <div className="mt-2 flex flex-col gap-1">
-                          <div className="flex justify-between text-[10px] font-semibold text-on-surface-variant">
-                            <span>Progress</span>
-                            <span>
-                              {ach.progress.current} / {ach.progress.total}
-                            </span>
-                          </div>
-                          <div className="w-full h-1.5 rounded-full bg-surface-container-highest overflow-hidden">
-                            <div
-                              className="h-full bg-primary rounded-full"
-                              style={{ width: `${(ach.progress.current / ach.progress.total) * 100}%` }}
-                            />
-                          </div>
+                      <p className="font-body-sm text-xs text-on-surface-variant mt-0.5">
+                        {ach.description}
+                      </p>
+                      {isUnlocked ? (
+                        <div className="flex items-center gap-1 mt-1 text-emerald-600 font-label-sm text-[11px] font-semibold">
+                          <span className="material-symbols-outlined text-xs">verified</span>
+                          <span>Unlocked • {ach.unlockDate || 'Achieved'}</span>
                         </div>
-                      )
-                    )}
+                      ) : (
+                        ach.targetProgress > 0 && (
+                          <div className="mt-2 flex flex-col gap-1">
+                            <div className="flex justify-between text-[10px] font-semibold text-on-surface-variant">
+                              <span>Progress</span>
+                              <span>
+                                {ach.currentProgress} / {ach.targetProgress}
+                              </span>
+                            </div>
+                            <div className="w-full h-1.5 rounded-full bg-surface-container-highest overflow-hidden">
+                              <div
+                                className="h-full bg-primary rounded-full"
+                                style={{ width: `${Math.min(100, Math.round((ach.currentProgress / ach.targetProgress) * 100))}%` }}
+                              />
+                            </div>
+                          </div>
+                        )
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* USER PERSONAL UNIQUE QR CODE MODAL (SHOWS ONLY USER'S QR CODE) */}
+      {isQrModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-md animate-fade-in">
+          <div className="w-full max-w-xs rounded-3xl bg-surface-container-lowest p-5 shadow-2xl border border-surface-container-high flex flex-col items-center text-center space-y-4 animate-fade-in">
+            {/* Header */}
+            <div className="flex items-center justify-between w-full">
+              <span className="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-1">
+                <span className="material-symbols-outlined text-[16px]">qr_code_2</span>
+                <span>Kairos Nexus QR</span>
+              </span>
+              <button
+                onClick={handleCloseQr}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-on-surface-variant hover:text-on-surface bg-surface-container-high/50 cursor-pointer"
+                type="button"
+              >
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
+
+            {/* Unique QR Code Card */}
+            <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 shadow-inner flex flex-col items-center w-full">
+              <UniqueQRCodeSVG
+                seed={kairosId || userProfile?.name || 'alex.rivera'}
+                size={160}
+                centerBadgeText="K"
+              />
+
+              <div className="mt-3">
+                <h4 className="text-sm font-bold text-on-surface">{customName}</h4>
+                <p className="text-xs text-indigo-600 font-semibold">{kairosId}</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-on-surface-variant leading-relaxed">
+              Have friends scan your unique Kairos QR code to instantly view your evolution profile and sync routines.
+            </p>
+
+            <div className="flex items-center gap-2 w-full">
+              <button
+                onClick={handleCopyLink}
+                className="flex-1 py-2.5 rounded-xl bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs font-bold active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                type="button"
+              >
+                <span className="material-symbols-outlined text-[16px]">
+                  {copyFeedback ? 'check' : 'content_copy'}
+                </span>
+                <span>{copyFeedback ? 'Copied!' : 'Copy Link'}</span>
+              </button>
+
+              <button
+                onClick={handleShareCode}
+                className="flex-1 py-2.5 rounded-xl bg-primary text-on-primary text-xs font-bold shadow-sm active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                type="button"
+              >
+                <span className="material-symbols-outlined text-[16px]">share</span>
+                <span>Share Code</span>
+              </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* SCANNED USER PROFILE MODAL (EXACT SAME EVOLUTION PROFILE AS FRIENDS SCREEN) */}
+      {scannedUserDetail && (
+        <div
+          onClick={() => setScannedUserDetail(null)}
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/75 backdrop-blur-md animate-fade-in"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-t-3xl sm:rounded-3xl bg-surface-container-lowest shadow-2xl border border-surface-container-high flex flex-col max-h-[88vh] overflow-hidden animate-slide-up"
+          >
+            {/* Modal Header */}
+            <div className="p-4 pb-3 border-b border-surface-container-high/80 bg-surface-container-low/80 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-fuchsia-600 text-white flex items-center justify-center shadow-xs">
+                  <span className="material-symbols-outlined text-[18px]">verified_user</span>
+                </span>
+                <div>
+                  <h3 className="text-sm font-bold text-on-surface leading-tight">
+                    Evolution Profile
+                  </h3>
+                  <p className="text-[10px] text-on-surface-variant font-medium">
+                    Verified Kairos Member • Scanned via QR
+                  </p>
+                </div>
+              </div>
 
+              <button
+                onClick={() => setScannedUserDetail(null)}
+                className="w-8 h-8 rounded-full bg-surface-container-high/60 flex items-center justify-center text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer"
+                type="button"
+              >
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
 
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto mobile-scroll p-4 space-y-4">
+              {/* Top Identity Header Card */}
+              <div className="flex items-center justify-between p-3.5 rounded-2xl bg-gradient-to-br from-indigo-50/70 via-surface-container-low to-purple-50/50 border border-indigo-100 shadow-2xs">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="relative shrink-0">
+                    <img
+                      src={scannedUserDetail.avatar}
+                      alt={scannedUserDetail.name}
+                      className="w-14 h-14 rounded-full object-cover ring-2 ring-indigo-500/30 shadow-md"
+                    />
+                    <span
+                      className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full ring-2 ring-white ${
+                        scannedUserDetail.status === 'focusing'
+                          ? 'bg-emerald-500 animate-pulse'
+                          : scannedUserDetail.status === 'online'
+                          ? 'bg-indigo-500'
+                          : scannedUserDetail.status === 'resting'
+                          ? 'bg-amber-400'
+                          : 'bg-slate-400'
+                      }`}
+                    />
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <h3 className="text-base font-extrabold text-on-surface truncate leading-tight">
+                      {scannedUserDetail.name}
+                    </h3>
+                    <p className="text-xs text-on-surface-variant font-medium">
+                      @{scannedUserDetail.username}
+                    </p>
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary text-on-primary font-bold shadow-2xs">
+                        {scannedUserDetail.league}
+                      </span>
+                      <span className="text-[10px] text-on-surface-variant font-medium truncate">
+                        {scannedUserDetail.role}
+                      </span>
+                    </div>
+                  </div>
+                </div>
 
+                <div className="shrink-0 flex flex-col items-end">
+                  <div className="px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-extrabold flex items-center gap-1 shadow-2xs">
+                    <span>Lvl {scannedUserDetail.level}</span>
+                  </div>
+                </div>
+              </div>
 
+              {/* Check if user account is private */}
+              {scannedUserDetail.visibilitySettings?.whoCanSee === 'private' ? (
+                <div className="p-6 rounded-2xl bg-surface-container-low border border-surface-container-high/80 flex flex-col items-center justify-center text-center space-y-3 my-2">
+                  <div className="w-12 h-12 rounded-2xl bg-surface-container-high flex items-center justify-center text-on-surface-variant shadow-xs">
+                    <span className="material-symbols-outlined text-[26px] text-slate-500">lock</span>
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-on-surface">This Account is Private</h4>
+                    <p className="text-xs text-on-surface-variant max-w-[260px] leading-relaxed mt-1">
+                      Detailed monthly focus metrics, balance web graph, and achievements are hidden by privacy settings.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* 1. Level & XP Progression */}
+                  <div className="p-3.5 rounded-2xl bg-surface-container-low border border-surface-container-high/80 shadow-xs flex flex-col space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-primary text-white flex items-center justify-center font-extrabold text-xs shadow-xs">
+                          {scannedUserDetail.level}
+                        </span>
+                        <div>
+                          <h4 className="text-xs font-bold text-on-surface">
+                            Level {scannedUserDetail.level} • {scannedUserDetail.levelTitle}
+                          </h4>
+                          <p className="text-[10px] text-on-surface-variant">Tier progression rank</p>
+                        </div>
+                      </div>
+                      <span className="text-xs font-extrabold text-primary">
+                        {scannedUserDetail.currentXp.toLocaleString()} /{' '}
+                        {scannedUserDetail.nextLevelXp.toLocaleString()} XP
+                      </span>
+                    </div>
 
+                    <div className="w-full h-2.5 rounded-full bg-surface-container-high overflow-hidden p-0.5">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-primary to-indigo-500 shadow-sm transition-all duration-500"
+                        style={{
+                          width: `${Math.min(
+                            100,
+                            (scannedUserDetail.currentXp / scannedUserDetail.nextLevelXp) * 100
+                          )}%`
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* 2. Monthly Tasks & HP Stat Cards */}
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div className="p-3.5 rounded-2xl bg-surface-container-low border border-surface-container-high/80 shadow-xs flex flex-col space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-on-surface-variant">
+                          Monthly Tasks
+                        </span>
+                        <span className="material-symbols-outlined text-[18px] text-primary">
+                          task_alt
+                        </span>
+                      </div>
+                      <div className="flex items-baseline gap-1.5">
+                        <span className="text-xl font-extrabold text-on-surface font-sans">
+                          {scannedUserDetail.monthlyTasksCompleted}
+                        </span>
+                        <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.2 rounded-md">
+                          {scannedUserDetail.monthlyTasksGrowth}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-on-surface-variant">
+                        {(scannedUserDetail.monthlyTasksCompleted / 30).toFixed(1)} tasks/day avg
+                      </p>
+                    </div>
+
+                    <div className="p-3.5 rounded-2xl bg-surface-container-low border border-surface-container-high/80 shadow-xs flex flex-col space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-on-surface-variant">
+                          Monthly HP
+                        </span>
+                        <span className="material-symbols-outlined text-[18px] text-amber-500">
+                          bolt
+                        </span>
+                      </div>
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-xl font-extrabold text-amber-600 font-sans">
+                          {scannedUserDetail.monthlyHpEarned.toLocaleString()}
+                        </span>
+                        <span className="text-[10px] font-bold text-amber-800">HP</span>
+                      </div>
+                      <p className="text-[10px] text-on-surface-variant">
+                        Squad spirit earned this month
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 3. 24-HOUR USED HOURS VS 24H TIMELINE GRAPH */}
+                  <Timeline24HourGraph userName={scannedUserDetail.name} />
+
+                  {/* 4. Top 5 Achievements Unlocked (Interactive Trophy Showcase Rack) */}
+                  {scannedUserDetail.topAchievements && scannedUserDetail.topAchievements.length > 0 && (
+                    <TopAchievementsShowcase achievements={scannedUserDetail.topAchievements} />
+                  )}
+
+                  {/* 5. Mutual Synergy Stats (Clean 3-Column Metric Tiles) */}
+                  <div className="grid grid-cols-3 gap-2">
+                    {/* Synergy Match Tile */}
+                    <div className="p-2.5 rounded-2xl bg-surface-container-low border border-surface-container-high/70 flex flex-col items-center text-center shadow-2xs">
+                      <div className="flex items-center gap-1 text-emerald-600 mb-0.5">
+                        <span className="material-symbols-outlined text-[15px]">sync_saved_locally</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Synergy</span>
+                      </div>
+                      <span className="text-base font-black text-on-surface font-sans">
+                        {scannedUserDetail.synergyMatch}%
+                      </span>
+                      <span className="text-[10px] text-on-surface-variant font-medium">Match</span>
+                    </div>
+
+                    {/* Co-Focus Hours Tile */}
+                    <div className="p-2.5 rounded-2xl bg-surface-container-low border border-surface-container-high/70 flex flex-col items-center text-center shadow-2xs">
+                      <div className="flex items-center gap-1 text-indigo-600 mb-0.5">
+                        <span className="material-symbols-outlined text-[15px]">timer</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Co-Focus</span>
+                      </div>
+                      <span className="text-base font-black text-indigo-600 font-sans">
+                        {scannedUserDetail.sharedFocusHours || 0}h
+                      </span>
+                      <span className="text-[10px] text-on-surface-variant font-medium">Completed</span>
+                    </div>
+
+                    {/* Mutual Squads Tile */}
+                    <div className="p-2.5 rounded-2xl bg-surface-container-low border border-surface-container-high/70 flex flex-col items-center text-center shadow-2xs">
+                      <div className="flex items-center gap-1 text-amber-600 mb-0.5">
+                        <span className="material-symbols-outlined text-[15px]">groups</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Squads</span>
+                      </div>
+                      <span className="text-base font-black text-on-surface font-sans">
+                        {scannedUserDetail.mutualSquads?.length || 0}
+                      </span>
+                      <span
+                        className="text-[10px] text-on-surface-variant font-medium truncate max-w-[85px]"
+                        title={scannedUserDetail.mutualSquads?.join(', ')}
+                      >
+                        {scannedUserDetail.mutualSquads?.[0] || 'Mutual'}
+                      </span>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Modal Bottom Actions */}
+            <div className="p-4 pt-3 border-t border-surface-container-high/80 bg-surface-container-low/60 flex items-center gap-2 shrink-0">
+              {!connectedUserIds.includes(scannedUserDetail.id) ? (
+                <>
+                  <button
+                    onClick={() => {
+                      handleConnectScannedUser(scannedUserDetail);
+                    }}
+                    className="flex-1 py-2.5 rounded-xl bg-primary text-on-primary text-xs font-bold active:scale-95 transition-all shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
+                    type="button"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">person_add</span>
+                    <span>Connect (+50 XP)</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      triggerHaptic(ImpactStyle.Medium);
+                      showToast(`🚀 Tandem Focus invite sent to ${scannedUserDetail.name}!`);
+                      setScannedUserDetail(null);
+                    }}
+                    className="py-2.5 px-3 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface text-xs font-bold active:scale-95 transition-all cursor-pointer flex items-center gap-1"
+                    type="button"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">timer</span>
+                    <span>Tandem</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      triggerHaptic(ImpactStyle.Heavy);
+                      showToast(`🔥 Cheer delivered to ${scannedUserDetail.name}! +15 Spirit`);
+                      setScannedUserDetail(null);
+                    }}
+                    className="py-2.5 px-3 rounded-xl bg-rose-50 text-rose-700 hover:bg-rose-100 text-xs font-bold active:scale-95 transition-all cursor-pointer flex items-center gap-1 border border-rose-200"
+                    type="button"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">favorite</span>
+                    <span>Cheer</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      triggerHaptic(ImpactStyle.Medium);
+                      showToast(`🚀 Tandem Focus invite sent to ${scannedUserDetail.name}!`);
+                      setScannedUserDetail(null);
+                    }}
+                    className="flex-1 py-2.5 rounded-xl bg-primary text-on-primary text-xs font-bold active:scale-95 transition-all shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
+                    type="button"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">timer</span>
+                    <span>Tandem Focus</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      triggerHaptic(ImpactStyle.Heavy);
+                      showToast(`🔥 Cheer delivered to ${scannedUserDetail.name}! +15 Spirit`);
+                      setScannedUserDetail(null);
+                    }}
+                    className="py-2.5 px-3.5 rounded-xl bg-rose-50 text-rose-700 hover:bg-rose-100 text-xs font-bold active:scale-95 transition-all cursor-pointer flex items-center gap-1 border border-rose-200"
+                    type="button"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">favorite</span>
+                    <span>Cheer</span>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Selected Achievement Highlight Modal */}
       {selectedAchievement && (
@@ -1090,30 +1730,57 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-[320px] rounded-3xl bg-surface-container-lowest p-5 text-center flex flex-col items-center shadow-2xl border border-surface-container-high/40 animate-scaleUp"
+            className="w-full max-w-[320px] rounded-3xl bg-surface-container-lowest p-5 text-center flex flex-col items-center shadow-2xl border border-surface-container-high/40 animate-scaleUp relative overflow-hidden"
           >
+            {/* Ambient Background Glow */}
             <div
-              className={`w-14 h-14 rounded-2xl ${selectedAchievement.badgeBg} flex items-center justify-center ${selectedAchievement.badgeText} shadow-md mb-3`}
-            >
-              <span
-                className="material-symbols-outlined text-3xl"
-                style={{ fontVariationSettings: "'FILL' 1" }}
-              >
-                {selectedAchievement.icon}
-              </span>
+              className="absolute -top-10 -right-10 w-36 h-36 rounded-full blur-3xl opacity-25 pointer-events-none"
+              style={{ backgroundColor: selectedAchievement.glowColor }}
+            />
+
+            {/* Large Frontview Medal */}
+            <div className="w-32 h-32 my-1 relative flex items-center justify-center z-10">
+              <CardBadgePreview
+                id={selectedAchievement.id}
+                name={selectedAchievement.title || selectedAchievement.name}
+                rarity={selectedAchievement.rarity}
+                modelType={selectedAchievement.modelType}
+                category={selectedAchievement.category}
+                glowColor={selectedAchievement.glowColor}
+                currentProgress={100}
+                targetProgress={100}
+                unlocked={Boolean(selectedAchievement.unlocked || selectedAchievement.isUnlocked)}
+                className="w-full h-full"
+              />
             </div>
-            <h3 className="text-lg font-bold text-on-surface">{selectedAchievement.title}</h3>
+
             <span
-              className={`mt-1 px-2.5 py-0.5 rounded-full ${selectedAchievement.badgePillBg} ${selectedAchievement.badgePillText} text-xs font-bold`}
+              className={`mt-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${getRarityPillStyle(selectedAchievement.rarity)}`}
             >
-              +{selectedAchievement.hpReward} HP Reward
+              {selectedAchievement.rarity} Medal
             </span>
-            <p className="text-xs text-on-surface-variant mt-2 px-1">
+
+            <h3 className="text-base font-extrabold text-on-surface mt-1.5">{selectedAchievement.title || selectedAchievement.name}</h3>
+
+            <div className="flex items-center gap-1.5 mt-1 text-primary font-bold text-xs">
+              <span className="material-symbols-outlined text-sm">bolt</span>
+              <span>+{calculateAchievementXpReward(selectedAchievement.rarity, progression.level)} XP Reward</span>
+            </div>
+
+            <p className="text-xs text-on-surface-variant mt-2 px-1 leading-relaxed">
               {selectedAchievement.description}
             </p>
+
+            {Boolean(selectedAchievement.unlocked || selectedAchievement.isUnlocked) && (
+              <div className="flex items-center gap-1 mt-2 text-emerald-600 font-label-sm text-[11px] font-semibold">
+                <span className="material-symbols-outlined text-sm">verified</span>
+                <span>Achieved {selectedAchievement.unlockDate || 'Recently'}</span>
+              </div>
+            )}
+
             <button
               onClick={() => setSelectedAchievement(null)}
-              className="mt-4 w-full py-2.5 rounded-full bg-primary text-on-primary font-bold text-xs active:scale-95 shadow-md shadow-primary/20"
+              className="mt-4 w-full py-2.5 rounded-full bg-primary text-on-primary font-bold text-xs active:scale-95 shadow-md shadow-primary/20 cursor-pointer border-none"
               type="button"
             >
               Close
@@ -1121,6 +1788,204 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           </div>
         </div>
       )}
+
+      {/* Toast Feedback Notification */}
+      {toastMessage && (
+        <div className="fixed top-16 inset-x-0 z-50 flex justify-center px-4 pointer-events-none animate-fade-in">
+          <div className="bg-slate-900/90 backdrop-blur-md text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg border border-slate-700/50 flex items-center space-x-2">
+            <span className="w-2 h-2 rounded-full bg-primary-container animate-pulse" />
+            <span>{toastMessage}</span>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Edit Profile (Includes Showcase Badges Customization) */}
+      {isEditModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm transition-opacity duration-200 animate-fade-in">
+          <div className="w-full max-w-sm rounded-3xl bg-surface-container-lowest shadow-2xl overflow-hidden border border-outline-variant/30 flex flex-col max-h-[90vh]">
+            <div className="p-4 bg-gradient-to-b from-surface-container-low to-surface-container-lowest border-b border-surface-container flex items-center justify-between">
+              <div>
+                <h3 className="font-headline-sm text-base text-on-surface font-bold">Edit Profile</h3>
+                <p className="text-[11px] text-on-surface-variant">Update identity, quote &amp; showcase badges</p>
+              </div>
+              <button
+                className="w-8 h-8 rounded-full bg-surface-container-high/60 flex items-center justify-center text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer"
+                onClick={() => setIsEditModalOpen(false)}
+                type="button"
+              >
+                <span className="material-symbols-outlined text-base font-bold">close</span>
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                triggerHaptic(ImpactStyle.Medium);
+                setShowcaseIds(tempShowcaseIds);
+                saveProfileExtension({
+                  customName,
+                  kairosId,
+                  userQuote,
+                  showcaseIds: tempShowcaseIds
+                });
+                setIsEditModalOpen(false);
+                showToast('✅ Profile & Showcase updated successfully!');
+              }}
+              className="p-4 space-y-4 overflow-y-auto mobile-scroll flex-1"
+            >
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-on-surface mb-1">Display Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={customName}
+                    onChange={(e) => setCustomName(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-surface-container-low border border-outline-variant text-xs font-semibold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-on-surface mb-1">Kairos ID</label>
+                  <input
+                    type="text"
+                    required
+                    value={kairosId}
+                    onChange={(e) => setKairosId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-surface-container-low border border-outline-variant text-xs font-semibold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-on-surface mb-1">Favorite Quote</label>
+                <textarea
+                  rows={2}
+                  value={userQuote}
+                  onChange={(e) => setUserQuote(e.target.value)}
+                  placeholder="Enter a quote you like to keep..."
+                  className="w-full px-3 py-2 rounded-xl bg-surface-container-low border border-outline-variant text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40 resize-none"
+                />
+              </div>
+
+              {/* Showcase Badges Selection (Modify What Others Can See) */}
+              <div className="space-y-2 pt-1 border-t border-surface-container-high/50">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="block text-xs font-bold text-on-surface">Showcase Badges</label>
+                    <p className="text-[10px] text-on-surface-variant">Select up to 5 badges visible to others</p>
+                  </div>
+                  <span className="text-xs font-bold text-primary px-2 py-0.5 rounded-full bg-primary-fixed/40">
+                    {tempShowcaseIds.length} / 5
+                  </span>
+                </div>
+
+                <div className="space-y-1.5 max-h-52 overflow-y-auto mobile-scroll pr-0.5">
+                  {achievements.map((ach) => {
+                    const isUnlocked = Boolean(ach.unlocked || ach.isUnlocked);
+                    const isSelected = tempShowcaseIds.includes(ach.id);
+                    const gradient = getRarityGradient2D(ach.rarity);
+                    const title = ach.title || ach.name;
+                    return (
+                      <div
+                        key={ach.id}
+                        onClick={() => {
+                          triggerHaptic(ImpactStyle.Light);
+                          if (!isUnlocked) {
+                            showToast('🔒 Locked: Complete milestone to unlock.');
+                            return;
+                          }
+                          if (isSelected) {
+                            setTempShowcaseIds((prev) => prev.filter((id) => id !== ach.id));
+                          } else {
+                            if (tempShowcaseIds.length >= 5) {
+                              showToast('⚠️ Maximum 5 showcase badges reached. Deselect one first.');
+                              return;
+                            }
+                            setTempShowcaseIds((prev) => [...prev, ach.id]);
+                          }
+                        }}
+                        className={`p-2.5 rounded-xl border transition-all flex items-center justify-between cursor-pointer ${
+                          isSelected
+                            ? 'bg-primary-fixed/20 border-primary shadow-xs'
+                            : isUnlocked
+                            ? 'bg-surface-container-low border-surface-container-high hover:border-outline-variant'
+                            : 'bg-surface-container-low/40 border-surface-container-high/40 opacity-60'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className={`w-8 h-8 rounded-lg bg-gradient-to-b ${gradient.bg} flex items-center justify-center text-white shadow-xs shrink-0`}
+                          >
+                            <span
+                              className="material-symbols-outlined text-[17px]"
+                              style={{ fontVariationSettings: "'FILL' 1" }}
+                            >
+                              {ach.icon}
+                            </span>
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <h4 className="text-xs font-bold text-on-surface leading-tight">
+                                {title}
+                              </h4>
+                              <span
+                                className={`text-[8px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded-full ${getRarityPillStyle(ach.rarity)}`}
+                              >
+                                {ach.rarity}
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-on-surface-variant line-clamp-1">
+                              {ach.description}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Toggle Checkbox / Lock */}
+                        <div className="shrink-0 pl-1.5">
+                          {!isUnlocked ? (
+                            <span className="material-symbols-outlined text-xs text-on-surface-variant">
+                              lock
+                            </span>
+                          ) : isSelected ? (
+                            <div className="w-4.5 h-4.5 rounded-full bg-primary text-white flex items-center justify-center shadow-xs">
+                              <span className="material-symbols-outlined text-[11px] font-bold">check</span>
+                            </div>
+                          ) : (
+                            <div className="w-4.5 h-4.5 rounded-full border-2 border-outline-variant" />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center gap-2 border-t border-surface-container-high/40">
+                <button
+                  type="button"
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="w-1/3 py-2 rounded-full bg-surface-container-high text-on-surface-variant text-xs font-semibold hover:bg-surface-container-highest transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2 rounded-full bg-primary text-on-primary text-xs font-bold shadow-md hover:bg-primary-container active:scale-95 transition-all cursor-pointer"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Bottom Navigation Dock */}
+      <BottomNavBar
+        activeTab="profile"
+        onNavigateTab={onNavigateTab}
+        userInitial={userProfile?.name?.[0] || 'A'}
+      />
     </div>
   );
 };

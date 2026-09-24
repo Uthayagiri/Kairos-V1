@@ -45,7 +45,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
         if (rounded < 25) {
           setStatusText('Initializing Kairos Core...');
         } else if (rounded < 55) {
-          setStatusText('Calibrating Circadian Cadence...');
+          setStatusText('Calibrating Circadian Rhythm...');
         } else if (rounded < 85) {
           setStatusText('Harmonizing Flow State...');
         } else {
@@ -379,7 +379,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
               Your AI Life Companion
             </p>
             <p className="font-body-md text-body-md text-on-surface-variant max-w-xs mx-auto leading-relaxed">
-              Aligning mind, energy, and cognitive cadence into your daily flow state.
+              Aligning mind, energy, and cognitive rhythm into your daily flow state.
             </p>
           </div>
         </div>

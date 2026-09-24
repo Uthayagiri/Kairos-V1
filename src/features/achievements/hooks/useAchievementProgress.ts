@@ -1,22 +1,72 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Achievement, FilterState, AchievementCategory, AchievementRarity, GlowStage } from '../types/achievement.types';
 import { INITIAL_ACHIEVEMENTS } from '../data/achievements';
-import { filterAchievements, getAchievementStats, getProgressRatio } from '../utils/achievementHelpers';
+import { filterAchievements, getAchievementStats } from '../utils/achievementHelpers';
+import { progressionManager } from '../../progression/services/progressionManager';
+import {
+  STORAGE_DOMAINS,
+  getUserScopedJSON,
+  setUserScopedJSON,
+  UserIdentifier
+} from '../../storage';
 
-const STORAGE_KEY = 'kairos_achievements_state_v2';
+export const STORAGE_KEY = 'kairos_achievements_state_v6';
 
-export function useAchievementProgress() {
-  const [achievements, setAchievements] = useState<Achievement[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch (e) {
-      console.warn('Failed to load achievements from localStorage', e);
+export function loadAchievementsForUser(userId?: UserIdentifier): Achievement[] {
+  try {
+    const parsed = getUserScopedJSON<Achievement[] | null>(STORAGE_DOMAINS.ACHIEVEMENTS, null, userId);
+    if (parsed && Array.isArray(parsed)) {
+      return INITIAL_ACHIEVEMENTS.map((initial) => {
+        const match = parsed.find((p) => p.id === initial.id);
+        if (match) {
+          const isUnlocked = Boolean(match.unlocked || match.isUnlocked);
+          return {
+            ...initial,
+            rewardHP: 0,
+            currentProgress: typeof match.currentProgress === 'number' ? match.currentProgress : 0,
+            unlocked: isUnlocked,
+            isUnlocked: isUnlocked,
+            unlockDate: isUnlocked ? (match.unlockDate || undefined) : undefined,
+            glowStage: match.glowStage || (isUnlocked ? 'UNLOCKED' : 'LOCKED')
+          };
+        }
+        return {
+          ...initial,
+          rewardHP: 0,
+          currentProgress: 0,
+          unlocked: false,
+          isUnlocked: false,
+          glowStage: 'LOCKED'
+        };
+      });
     }
-    return INITIAL_ACHIEVEMENTS;
+  } catch (e) {
+    console.warn('Failed to load achievements from userScopedStorage', e);
+  }
+  return INITIAL_ACHIEVEMENTS.map(a => ({
+    ...a,
+    rewardHP: 0,
+    currentProgress: 0,
+    unlocked: false,
+    isUnlocked: false,
+    glowStage: 'LOCKED'
+  }));
+}
+
+export function useAchievementProgress(userProfile?: UserIdentifier) {
+  const [achievements, setAchievements] = useState<Achievement[]>(() => {
+    return loadAchievementsForUser(userProfile);
   });
+  const isInitialMount = useRef(true);
+  const skipNextSave = useRef(false);
+  const userProfileRef = useRef(userProfile);
+  userProfileRef.current = userProfile;
+
+  // Sync state on user profile change
+  useEffect(() => {
+    skipNextSave.current = true;
+    setAchievements(loadAchievementsForUser(userProfile));
+  }, [userProfile]);
 
   const [filters, setFilters] = useState<FilterState>({
     searchQuery: '',
@@ -29,12 +79,20 @@ export function useAchievementProgress() {
   const [selectedAchievement, setSelectedAchievement] = useState<Achievement | null>(null);
   const [unlockedForCelebration, setUnlockedForCelebration] = useState<Achievement | null>(null);
 
-  // Persist to local storage
+  // Persist to user scoped storage only on progress mutations, avoiding writes during hydration
   useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    if (skipNextSave.current) {
+      skipNextSave.current = false;
+      return;
+    }
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(achievements));
+      setUserScopedJSON(STORAGE_DOMAINS.ACHIEVEMENTS, achievements, userProfileRef.current);
     } catch (e) {
-      console.warn('Failed to save achievements to localStorage', e);
+      console.warn('Failed to save achievements to userScopedStorage', e);
     }
   }, [achievements]);
 
@@ -43,9 +101,10 @@ export function useAchievementProgress() {
     return filterAchievements(achievements, filters);
   }, [achievements, filters]);
 
-  // Aggregate stats
+  // Aggregate stats using current user level for accurate level-scaled rewards
   const stats = useMemo(() => {
-    return getAchievementStats(achievements);
+    const currentLevel = progressionManager.getState().level;
+    return getAchievementStats(achievements, currentLevel);
   }, [achievements]);
 
   // Filter handlers
@@ -87,6 +146,7 @@ export function useAchievementProgress() {
         if (item.id === id && !(item.unlocked || item.isUnlocked)) {
           target = {
             ...item,
+            rewardHP: 0,
             unlocked: true,
             isUnlocked: true,
             unlockDate: 'Just now',
@@ -99,6 +159,12 @@ export function useAchievementProgress() {
       });
 
       if (target) {
+        // Award level-scaled XP via ProgressionManager (strictly idempotent, 0 HP)
+        progressionManager.awardAchievementUnlock({
+          id: (target as Achievement).id,
+          rarity: (target as Achievement).rarity,
+          title: (target as Achievement).name || (target as Achievement).title
+        });
         setUnlockedForCelebration(target);
       }
       return updated;
@@ -128,6 +194,7 @@ export function useAchievementProgress() {
 
           const updatedItem: Achievement = {
             ...item,
+            rewardHP: 0,
             currentProgress: newCurrent,
             unlocked: item.unlocked || shouldUnlock,
             isUnlocked: item.isUnlocked || shouldUnlock,
@@ -144,6 +211,12 @@ export function useAchievementProgress() {
       });
 
       if (targetToUnlock) {
+        // Award level-scaled XP via ProgressionManager (strictly idempotent, 0 HP)
+        progressionManager.awardAchievementUnlock({
+          id: (targetToUnlock as Achievement).id,
+          rarity: (targetToUnlock as Achievement).rarity,
+          title: (targetToUnlock as Achievement).name || (targetToUnlock as Achievement).title
+        });
         setUnlockedForCelebration(targetToUnlock);
       }
       return updated;

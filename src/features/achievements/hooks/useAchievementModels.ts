@@ -232,14 +232,25 @@ export function useAchievementModels(config: ModelRenderConfig) {
         const shieldPlate = new THREE.Mesh(shieldGeo, brushedSteelMaterial);
         group.add(shieldPlate);
 
-        const crest = new THREE.Mesh(new THREE.OctahedronGeometry(0.48, 1), polishedGoldMaterial);
-        crest.scale.set(1.1, 1.1, 0.5);
-        crest.position.z = 0.22;
-        group.add(crest);
+        // Front Crest & Ruby Insignia (+Z)
+        const crestFront = new THREE.Mesh(new THREE.OctahedronGeometry(0.48, 1), polishedGoldMaterial);
+        crestFront.scale.set(1.1, 1.1, 0.5);
+        crestFront.position.z = 0.22;
+        group.add(crestFront);
 
-        const rubyInsignia = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 16), rubyMaterial);
-        rubyInsignia.position.z = 0.36;
-        group.add(rubyInsignia);
+        const rubyFront = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 16), rubyMaterial);
+        rubyFront.position.z = 0.36;
+        group.add(rubyFront);
+
+        // Back Crest & Ruby Insignia (-Z) for identical double-sided design
+        const crestBack = new THREE.Mesh(new THREE.OctahedronGeometry(0.48, 1), polishedGoldMaterial);
+        crestBack.scale.set(1.1, 1.1, 0.5);
+        crestBack.position.z = -0.22;
+        group.add(crestBack);
+
+        const rubyBack = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 16), rubyMaterial);
+        rubyBack.position.z = -0.36;
+        group.add(rubyBack);
         break;
       }
 
@@ -331,10 +342,17 @@ export function useAchievementModels(config: ModelRenderConfig) {
         group.add(createBlade(Math.PI / 4.2));
         group.add(createBlade(-Math.PI / 4.2));
 
-        const bossMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.48, 0.16, 16), polishedGoldMaterial);
-        bossMesh.rotateX(Math.PI / 2);
-        bossMesh.position.z = 0.16;
-        group.add(bossMesh);
+        // Front boss (+Z)
+        const bossMeshFront = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.48, 0.16, 16), polishedGoldMaterial);
+        bossMeshFront.rotateX(Math.PI / 2);
+        bossMeshFront.position.z = 0.16;
+        group.add(bossMeshFront);
+
+        // Back boss (-Z)
+        const bossMeshBack = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.48, 0.16, 16), polishedGoldMaterial);
+        bossMeshBack.rotateX(Math.PI / 2);
+        bossMeshBack.position.z = -0.16;
+        group.add(bossMeshBack);
         break;
       }
 

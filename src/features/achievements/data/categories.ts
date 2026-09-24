@@ -29,7 +29,7 @@ export const ACHIEVEMENT_CATEGORIES: CategoryMeta[] = [
     id: 'perfect-performance',
     label: 'Perfect Performance',
     icon: 'star',
-    description: 'Flawless 100% daily ritual execution and perfect days',
+    description: 'Flawless 100% daily task execution and perfect days',
     accentColor: '#eab308',
     gradient: 'from-yellow-400 to-amber-600'
   },

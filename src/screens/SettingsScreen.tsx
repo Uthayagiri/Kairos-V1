@@ -1,5 +1,26 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { AppTopBar } from '../components/AppTopBar';
+import {
+  useTaskTimingSettings,
+  SchedulePreset,
+  TaskTimingSettings,
+  RoutineWindows,
+  SYSTEM_DEFAULT_TASKS,
+  formatTimeLabel,
+  calculateEndTime,
+  progressionManager,
+  resetFocusSessions,
+  resetUserTasks
+} from '../features/progression';
+import {
+  STORAGE_DOMAINS,
+  getUserScopedJSON,
+  setUserScopedJSON,
+  clearUserScopedData,
+  clearActiveUser
+} from '../features/storage';
+import { squadService } from '../features/squad';
 
 interface SettingsScreenProps {
   userProfile?: { email: string; name: string } | null;
@@ -17,24 +38,71 @@ export function SettingsScreen({
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Task Timing & Circadian Rhythm Settings
+  const {
+    settings: timingSettings,
+    updateSettings: setTimingSettings,
+    applyPreset: applyTimingPreset,
+    updateDuration: updateTimingDuration,
+    updateDefaultStartTime: updateTimingDefaultStartTime,
+    updateRoutineWindows: updateTimingRoutineWindows,
+    updateTaskOverride: updateTimingTaskOverride,
+    removeTaskOverride: removeTimingTaskOverride,
+    resetDefaults: resetTimingDefaults
+  } = useTaskTimingSettings();
+
   // Toggles state
   const [deepThinkEnabled, setDeepThinkEnabled] = useState(true);
   const [autoExtractEnabled, setAutoExtractEnabled] = useState(true);
   const [circadianSyncEnabled, setCircadianSyncEnabled] = useState(true);
-  const [ritualRemindersEnabled, setRitualRemindersEnabled] = useState(true);
+  const [taskRemindersEnabled, setTaskRemindersEnabled] = useState(true);
   const [appLockEnabled, setAppLockEnabled] = useState(true);
   const [incognitoEnabled, setIncognitoEnabled] = useState(false);
   const [hapticsEnabled, setHapticsEnabled] = useState(true);
 
   // Preference Values
   const [persona, setPersona] = useState('Aura (Empathetic)');
-  const [voiceCadence, setVoiceCadence] = useState('Sol');
+  const [voiceTone, setVoiceTone] = useState('Sol');
   const [proactivityLevel, setProactivityLevel] = useState<'Gentle' | 'Balanced' | 'Intense'>('Gentle');
   const [restWindow, setRestWindow] = useState('11PM - 7AM');
-  const [socialVisibility, setSocialVisibility] = useState<'Friends Only' | 'Public' | 'Ghost Mode'>('Friends Only');
+  const [socialVisibility, setSocialVisibility] = useState<'Squad & Friends' | 'Public' | 'Connections Only' | 'Private Account'>('Squad & Friends');
+  const [visibilitySettings, setVisibilitySettings] = useState({
+    showLevel: true,
+    showMonthlyTasks: true,
+    showMonthlyHp: true,
+    showWebGraph: true,
+    showTopAchievements: true,
+    showLivePresence: true
+  });
   const [appearanceMode, setAppearanceMode] = useState<'Auto Light' | 'Pure Dark' | 'Solar Circadian'>('Auto Light');
   const [cacheSize, setCacheSize] = useState('142 MB');
   const [isClearingCache, setIsClearingCache] = useState(false);
+
+  // Downtime Protocol & Nightly Curfew State
+  const [downtimeSettings, setDowntimeSettings] = useState(() => {
+    try {
+      const saved = getUserScopedJSON<any>(STORAGE_DOMAINS.DOWNTIME_SETTINGS, null);
+      if (saved) {
+        return saved;
+      }
+    } catch {}
+    return {
+      enabled: true,
+      startTime: '22:30',
+      endTime: '07:00',
+      mode: 'strict' as 'strict' | 'gentle',
+      days: 'everyday' as 'everyday' | 'weekdays' | 'weekends'
+    };
+  });
+
+  // Save Downtime Settings
+  useEffect(() => {
+    try {
+      setUserScopedJSON(STORAGE_DOMAINS.DOWNTIME_SETTINGS, downtimeSettings);
+    } catch {
+      // ignore
+    }
+  }, [downtimeSettings]);
 
   // Modals state
   const [activeModal, setActiveModal] = useState<
@@ -42,6 +110,8 @@ export function SettingsScreen({
     | 'persona'
     | 'voice'
     | 'proactivity'
+    | 'taskTiming'
+    | 'downtime'
     | 'vault'
     | 'buffer'
     | 'rest'
@@ -124,7 +194,7 @@ export function SettingsScreen({
     return (
       matchesSearch('Companion & AI Intelligence') ||
       matchesSearch('Companion Persona Aura Empathetic') ||
-      matchesSearch('Voice & Tone Cadence Sol Warm Studio') ||
+      matchesSearch('Voice & Tone Pace Sol Warm Studio') ||
       matchesSearch('Proactivity Level Balanced Nudges Mindful study') ||
       matchesSearch('Deep Think 2.5 Pro Enhanced multi-step cognitive synthesis')
     );
@@ -141,10 +211,12 @@ export function SettingsScreen({
 
   const section3Visible = useMemo(() => {
     return (
-      matchesSearch('Circadian Cadence & Notifications') ||
+      matchesSearch('Circadian Rhythm & Notifications') ||
       matchesSearch('Circadian Rhythm Sync gentle morning wakeup midday focus peak') ||
+      matchesSearch('Default Task Timing routine schedule windows duration presets early bird balanced night owl') ||
+      matchesSearch('Downtime Protocol & Nightly Curfew Scheduled nightly silence freeze non-vital apps') ||
       matchesSearch('Gentle Rest Window mute non-vital alerts 11:00 PM 7:00 AM') ||
-      matchesSearch('Ritual & Task Reminders scheduled nudges habit blocks')
+      matchesSearch('Task Reminders scheduled nudges habit blocks')
     );
   }, [searchQuery]);
 
@@ -153,7 +225,7 @@ export function SettingsScreen({
       matchesSearch('Connectivity & Integrations') ||
       matchesSearch('Apple Health & Biometrics recovery HRV sleep stage sync') ||
       matchesSearch('Calendar Sync Google Calendar accounts linked') ||
-      matchesSearch('Squad & Social Visibility cadence leaderboard weekly podium')
+      matchesSearch('Profile & Squad Visibility who can see balance web graph achievements stats')
     );
   }, [searchQuery]);
 
@@ -185,8 +257,8 @@ export function SettingsScreen({
     section6Visible;
 
   return (
-    <div className="w-full h-full bg-surface text-on-surface font-body-md min-h-screen flex flex-col selection:bg-primary-fixed selection:text-on-primary-fixed antialiased relative overflow-x-hidden">
-      {/* Toast Notification */}
+    <div className="w-full h-full bg-surface text-on-surface font-body-md flex flex-col selection:bg-primary-fixed selection:text-on-primary-fixed antialiased relative overflow-hidden animate-fade-in">
+      {/* Toast Feedback */}
       {toastMessage && (
         <div className="fixed top-20 inset-x-0 z-50 flex justify-center px-4 pointer-events-none animate-fadeIn">
           <div className="bg-on-surface text-surface-container-lowest px-4 py-2.5 rounded-full shadow-2xl flex items-center gap-2 text-xs font-semibold max-w-[90%] border border-surface-container-high/20 backdrop-blur-md">
@@ -197,58 +269,37 @@ export function SettingsScreen({
       )}
 
       {/* Header */}
-      <header className="fixed top-0 w-full z-40 pt-safe bg-surface/80 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
-        <div className="h-28 px-gutter-mobile flex flex-col justify-center gap-space-xs">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-space-xs">
-              <button
-                aria-label="Back"
-                className="w-11 h-11 flex items-center justify-center rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors active:scale-95 cursor-pointer border-none bg-transparent"
-                onClick={handleBack}
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[20px]">arrow_back</span>
-              </button>
-              <h1 className="font-headline-sm text-headline-sm text-on-surface">Settings</h1>
-            </div>
-            <div className="flex items-center gap-space-xs">
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="text-xs text-primary font-semibold hover:underline"
-                  type="button"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-          </div>
-          <div className="w-full">
-            <div className="h-10 px-space-sm rounded-full bg-surface-container-low/90 flex items-center gap-space-xs shadow-[inset_0_1px_2px_rgba(0,0,0,0.03)] border border-surface-container-high/40 focus-within:border-primary/40 focus-within:bg-surface-container-lowest transition-all">
-              <span className="material-symbols-outlined text-[18px] text-outline shrink-0">search</span>
-              <input
-                className="w-full bg-transparent border-none outline-none font-body-sm text-body-sm text-on-surface placeholder:text-outline"
-                placeholder="Search settings and preferences..."
-                type="search"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="w-5 h-5 rounded-full bg-surface-container flex items-center justify-center text-outline hover:text-on-surface text-xs shrink-0"
-                  type="button"
-                >
-                  <span className="material-symbols-outlined text-[14px]">close</span>
-                </button>
-              )}
-            </div>
-          </div>
+      {/* Top Header App Bar (Left: Back Arrow Head + Splash Orb + Title/Subtitle) */}
+      <AppTopBar
+        subtitle="System Settings"
+        onBack={handleBack}
+      />
+
+      {/* Search Filter Header Sub-bar */}
+      <div className="px-4 py-2.5 bg-surface/95 backdrop-blur-xl border-b border-surface-container/60 shrink-0">
+        <div className="h-10 px-3 rounded-xl bg-surface-container-low flex items-center gap-2 border border-surface-container-high/40 focus-within:border-primary/40 focus-within:bg-surface-container-lowest transition-all">
+          <span className="material-symbols-outlined text-[18px] text-outline shrink-0">search</span>
+          <input
+            className="w-full bg-transparent border-none outline-none text-xs text-on-surface placeholder:text-outline"
+            placeholder="Search settings and preferences..."
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="w-5 h-5 rounded-full bg-surface-container flex items-center justify-center text-outline hover:text-on-surface text-xs shrink-0 cursor-pointer"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[14px]">close</span>
+            </button>
+          )}
         </div>
-      </header>
+      </div>
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col relative w-full pt-32 pb- dock-safe-inset pb-32 px-gutter-mobile bg-surface overflow-y-auto mobile-scroll">
+      <main className="flex-1 flex flex-col relative w-full pt-3 pb-20 px-4 bg-surface overflow-y-auto mobile-scroll">
         <div className="flex flex-col w-full pb-10 max-w-[440px] mx-auto">
           {!hasAnyMatch ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -314,7 +365,7 @@ export function SettingsScreen({
                     )}
 
                     {/* Voice & Tone */}
-                    {matchesSearch('Voice & Tone Cadence Warm Studio Sol Auto-playback') && (
+                    {matchesSearch('Voice & Tone Pace Warm Studio Sol Auto-playback') && (
                       <button
                         onClick={() => {
                           triggerHaptic(ImpactStyle.Light);
@@ -328,20 +379,20 @@ export function SettingsScreen({
                         </div>
                         <div className="flex flex-col min-w-0 flex-1">
                           <span className="font-label-lg text-label-lg text-on-surface font-semibold truncate">
-                            Voice &amp; Tone Cadence
+                            Voice &amp; Tone Pace
                           </span>
                           <span className="font-body-sm text-body-sm text-outline truncate">
-                            Warm Studio • {voiceCadence} • Auto-playback enabled
+                            Warm Studio • {voiceTone} • Auto-playback enabled
                           </span>
                         </div>
                         <span className="font-label-md text-label-md text-primary font-semibold flex-shrink-0 flex items-center gap-0.5">
-                          {voiceCadence} <span className="material-symbols-outlined text-[18px]">chevron_right</span>
+                          {voiceTone} <span className="material-symbols-outlined text-[18px]">chevron_right</span>
                         </span>
                       </button>
                     )}
 
                     {/* Proactivity Level */}
-                    {matchesSearch('Proactivity Level Balanced Nudges Mindful study cadence Gentle') && (
+                    {matchesSearch('Proactivity Level Balanced Nudges Mindful study routine Gentle') && (
                       <button
                         onClick={() => {
                           triggerHaptic(ImpactStyle.Light);
@@ -358,7 +409,7 @@ export function SettingsScreen({
                             Proactivity Level
                           </span>
                           <span className="font-body-sm text-body-sm text-outline truncate">
-                            Balanced Nudges • Mindful study cadence
+                            Balanced Nudges • Mindful study pace
                           </span>
                         </div>
                         <span className="px-2.5 py-1 rounded-full bg-surface-container-high text-on-surface font-label-sm text-label-sm font-semibold">
@@ -464,7 +515,7 @@ export function SettingsScreen({
                             Auto-Extract Insights
                           </span>
                           <span className="font-body-sm text-body-sm text-outline truncate">
-                            Continuously extract learning cues from cadence
+                            Continuously extract learning cues from routines
                           </span>
                         </div>
                         <button
@@ -522,12 +573,12 @@ export function SettingsScreen({
                 </div>
               )}
 
-              {/* Section 3: Circadian Cadence & Notifications */}
+              {/* Section 3: Circadian Rhythm & Notifications */}
               {section3Visible && (
                 <div className="flex flex-col gap-space-2xs animate-fadeIn">
                   <div className="px-space-xs flex items-center justify-between">
                     <span className="font-label-sm text-label-sm uppercase tracking-wider text-outline font-bold">
-                      Circadian Cadence &amp; Notifications
+                      Circadian Rhythm &amp; Notifications
                     </span>
                   </div>
                   <div className="w-full rounded-2xl bg-surface-container-lowest shadow-[0_6px_24px_-4px_rgba(79,70,229,0.06)] border border-surface-container-high/40 overflow-hidden divide-y divide-surface-container-high/30">
@@ -570,7 +621,40 @@ export function SettingsScreen({
                       </div>
                     )}
 
-                    {/* Restorative Sleep Cadence */}
+                    {/* Default Task Timing & Routine Rhythm */}
+                    {matchesSearch('Default Task Timing routine schedule windows duration presets early bird balanced night owl') && (
+                      <button
+                        onClick={() => {
+                          triggerHaptic(ImpactStyle.Light);
+                          setActiveModal('taskTiming');
+                        }}
+                        className="w-full p-space-md flex items-center gap-space-md text-left hover:bg-surface-container-low/60 transition-colors bg-surface-container-lowest active:bg-surface-container cursor-pointer border-none"
+                        type="button"
+                        id="btnSettingsDefaultTaskTiming"
+                      >
+                        <div className="w-10 h-10 rounded-full bg-primary-fixed flex items-center justify-center text-primary flex-shrink-0 shadow-sm">
+                          <span className="material-symbols-outlined text-[22px]">schedule</span>
+                        </div>
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-label-lg text-label-lg text-on-surface font-semibold truncate">
+                              Default Task Timing
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full bg-primary-fixed/40 text-primary font-label-sm text-[10px] font-bold capitalize">
+                              {timingSettings.preset.replace('_', ' ')}
+                            </span>
+                          </div>
+                          <span className="font-body-sm text-body-sm text-outline truncate">
+                            {timingSettings.defaultTaskDurationMinutes}m missions • Start {formatTimeLabel(timingSettings.defaultTaskStartTime)} • Morning {formatTimeLabel(timingSettings.routineWindows.morningStart)}
+                          </span>
+                        </div>
+                        <span className="font-label-md text-label-md text-primary font-semibold flex-shrink-0 flex items-center gap-0.5">
+                          Configure <span className="material-symbols-outlined text-[18px]">chevron_right</span>
+                        </span>
+                      </button>
+                    )}
+
+                    {/* Restorative Sleep Rhythm */}
                     {matchesSearch('Gentle Rest Window mute non-vital alerts 11:00 PM 7:00 AM') && (
                       <button
                         onClick={() => {
@@ -580,57 +664,126 @@ export function SettingsScreen({
                         className="w-full p-space-md flex items-center gap-space-md text-left hover:bg-surface-container-low/60 transition-colors bg-surface-container-lowest active:bg-surface-container cursor-pointer border-none"
                         type="button"
                       >
-                        <div className="w-10 h-10 rounded-full bg-surface-variant flex items-center justify-center text-primary flex-shrink-0 shadow-sm">
+                        <div className="w-10 h-10 rounded-full bg-tertiary-fixed flex items-center justify-center text-tertiary flex-shrink-0 shadow-sm">
                           <span className="material-symbols-outlined text-[22px]">bedtime</span>
                         </div>
                         <div className="flex flex-col min-w-0 flex-1">
                           <span className="font-label-lg text-label-lg text-on-surface font-semibold truncate">
-                            Gentle Rest Window
+                            Restorative Sleep Rhythm
                           </span>
                           <span className="font-body-sm text-body-sm text-outline truncate">
-                            Mute non-vital alerts ({restWindow === '11PM - 7AM' ? '11:00 PM – 7:00 AM' : restWindow})
+                            Gentle Rest Window • {restWindow}
                           </span>
                         </div>
-                        <span className="font-label-md text-label-md text-on-surface font-medium flex items-center gap-1">
-                          {restWindow}{' '}
-                          <span className="material-symbols-outlined text-[18px] text-outline">chevron_right</span>
+                        <span className="font-label-md text-label-md text-primary font-semibold flex-shrink-0 flex items-center gap-0.5">
+                          {restWindow} <span className="material-symbols-outlined text-[18px]">chevron_right</span>
                         </span>
                       </button>
                     )}
 
-                    {/* Daily Routine Reminders Toggle */}
-                    {matchesSearch('Ritual & Task Reminders scheduled nudges active habit blocks') && (
+                    {/* Downtime Protocol & Nightly Curfew */}
+                    {matchesSearch('Downtime Protocol & Nightly Curfew Scheduled nightly silence freeze non-vital apps') && (
                       <div className="w-full p-space-md flex items-center gap-space-md justify-between bg-surface-container-lowest">
-                        <div className="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center text-primary-container flex-shrink-0 shadow-sm">
+                        <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-600 flex-shrink-0 shadow-sm">
+                          <span className="material-symbols-outlined text-[22px]">nights_stay</span>
+                        </div>
+                        <div
+                          onClick={() => {
+                            triggerHaptic(ImpactStyle.Light);
+                            setActiveModal('downtime');
+                          }}
+                          className="flex flex-col min-w-0 flex-1 pr-2 cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="font-label-lg text-label-lg text-on-surface font-semibold truncate">
+                              Downtime Protocol &amp; Curfew
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                downtimeSettings.enabled
+                                  ? 'bg-primary-fixed/40 text-primary'
+                                  : 'bg-surface-container text-outline'
+                              }`}
+                            >
+                              {downtimeSettings.enabled
+                                ? `${downtimeSettings.startTime} – ${downtimeSettings.endTime}`
+                                : 'Paused'}
+                            </span>
+                          </div>
+                          <span className="font-body-sm text-body-sm text-outline truncate">
+                            Scheduled nightly silence • {downtimeSettings.mode === 'strict' ? 'Strict App Freeze' : 'Gentle Dimming'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <button
+                            onClick={() => {
+                              triggerHaptic(ImpactStyle.Light);
+                              setActiveModal('downtime');
+                            }}
+                            className="px-2.5 py-1 rounded-full bg-surface-container hover:bg-surface-container-high text-primary font-label-sm text-xs font-bold cursor-pointer border-none"
+                            type="button"
+                          >
+                            Configure
+                          </button>
+                          <button
+                            aria-label="Toggle Downtime Protocol"
+                            className={`w-12 h-7 rounded-full flex items-center p-1 cursor-pointer transition-colors shadow-inner flex-shrink-0 border-none ${
+                              downtimeSettings.enabled ? 'bg-primary-container' : 'bg-surface-container-highest'
+                            }`}
+                            onClick={() => {
+                              triggerHaptic(ImpactStyle.Light);
+                              const updated = !downtimeSettings.enabled;
+                              setDowntimeSettings((prev: any) => ({ ...prev, enabled: updated }));
+                              showToast(
+                                updated
+                                  ? `Downtime protocol engaged (${downtimeSettings.startTime} – ${downtimeSettings.endTime})`
+                                  : 'Downtime protocol paused'
+                              );
+                            }}
+                            type="button"
+                          >
+                            <span
+                              className={`w-5 h-5 rounded-full bg-surface-container-lowest shadow-md transform transition-transform duration-200 ease-in-out ${
+                                downtimeSettings.enabled ? 'translate-x-5' : 'translate-x-0'
+                              }`}
+                            />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Proactive Interrupt Pace */}
+                    {matchesSearch('Daily Interrupt Frequency Real-time Adaptive Nudges') && (
+                      <div className="w-full p-space-md flex items-center gap-space-md justify-between bg-surface-container-lowest">
+                        <div className="w-10 h-10 rounded-full bg-primary-fixed flex items-center justify-center text-primary flex-shrink-0 shadow-sm">
                           <span className="material-symbols-outlined text-[22px]">notifications_active</span>
                         </div>
                         <div className="flex flex-col min-w-0 flex-1 pr-2">
                           <span className="font-label-lg text-label-lg text-on-surface font-semibold truncate">
-                            Ritual &amp; Task Reminders
+                            Task Reminders &amp; Nudges
                           </span>
                           <span className="font-body-sm text-body-sm text-outline truncate">
-                            Scheduled nudges for active habit blocks
+                            Real-time adaptive task reminders
                           </span>
                         </div>
                         <button
-                          aria-label="Toggle Ritual and Task Reminders"
                           className={`w-12 h-7 rounded-full flex items-center p-1 cursor-pointer transition-colors shadow-inner flex-shrink-0 border-none ${
-                            ritualRemindersEnabled ? 'bg-primary-container' : 'bg-surface-container-highest'
+                            taskRemindersEnabled ? 'bg-primary-container' : 'bg-surface-container-highest'
                           }`}
                           onClick={() => {
                             triggerHaptic(ImpactStyle.Light);
-                            setRitualRemindersEnabled(!ritualRemindersEnabled);
+                            setTaskRemindersEnabled(!taskRemindersEnabled);
                             showToast(
-                              !ritualRemindersEnabled
-                                ? 'Ritual reminders enabled'
-                                : 'Ritual reminders silenced'
+                              !taskRemindersEnabled
+                                ? 'Task reminders enabled'
+                                : 'Task reminders silenced'
                             );
                           }}
                           type="button"
                         >
                           <span
                             className={`w-5 h-5 rounded-full bg-surface-container-lowest shadow-md transform transition-transform duration-200 ease-in-out ${
-                              ritualRemindersEnabled ? 'translate-x-5' : 'translate-x-0'
+                              taskRemindersEnabled ? 'translate-x-5' : 'translate-x-0'
                             }`}
                           />
                         </button>
@@ -706,8 +859,8 @@ export function SettingsScreen({
                       </button>
                     )}
 
-                    {/* Social Squad Visibility */}
-                    {matchesSearch('Squad & Social Visibility cadence leaderboard weekly podium Friends Only') && (
+                    {/* Profile & Squad Visibility */}
+                    {matchesSearch('Profile & Squad Visibility who can see rhythm web graph achievements stats') && (
                       <button
                         onClick={() => {
                           triggerHaptic(ImpactStyle.Light);
@@ -717,14 +870,14 @@ export function SettingsScreen({
                         type="button"
                       >
                         <div className="w-10 h-10 rounded-full bg-primary-fixed flex items-center justify-center text-primary flex-shrink-0 shadow-sm">
-                          <span className="material-symbols-outlined text-[22px]">group</span>
+                          <span className="material-symbols-outlined text-[22px]">shield_person</span>
                         </div>
                         <div className="flex flex-col min-w-0 flex-1">
                           <span className="font-label-lg text-label-lg text-on-surface font-semibold truncate">
-                            Squad &amp; Social Visibility
+                            Profile &amp; Squad Visibility
                           </span>
                           <span className="font-body-sm text-body-sm text-outline truncate">
-                            Cadence leaderboard and weekly podium status
+                            Who can see your rhythm, web graph &amp; achievements
                           </span>
                         </div>
                         <span className="px-2.5 py-1 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm font-semibold flex-shrink-0">
@@ -1027,64 +1180,6 @@ export function SettingsScreen({
         </div>
       </main>
 
-      {/* Floating Bottom Navigation Dock */}
-      <nav
-        className="fixed bottom-4 inset-x-0 z-50 flex justify-center px-4 pointer-events-none pb-safe"
-        data-active-classes="text-primary-container font-bold"
-      >
-        <div className="pointer-events-auto flex items-center justify-between w-full max-w-[380px] h-16 px-2.5 rounded-full bg-surface-container-lowest/85 backdrop-blur-2xl shadow-[0_20px_48px_-8px_rgba(15,23,42,0.12),0_0_1px_1px_rgba(99,102,241,0.15)] border border-surface-container-high/60">
-          {/* Home */}
-          <button
-            onClick={() => handleTabClick('home')}
-            aria-label="Home Dashboard"
-            className="relative min-w-[44px] min-h-[44px] w-12 h-12 flex items-center justify-center rounded-full text-on-surface-variant transition-all duration-300 hover:text-on-surface active:scale-95 cursor-pointer border-none bg-transparent"
-            type="button"
-          >
-            <span className="material-symbols-outlined text-headline-sm">home</span>
-          </button>
-
-          {/* Daily Tasks */}
-          <button
-            onClick={() => handleTabClick('tasks')}
-            aria-label="Daily Cadence Tasks"
-            className="relative min-w-[44px] min-h-[44px] w-12 h-12 flex items-center justify-center rounded-full text-on-surface-variant transition-all duration-300 hover:text-on-surface active:scale-95 cursor-pointer border-none bg-transparent"
-            type="button"
-          >
-            <span className="material-symbols-outlined text-headline-sm">check_circle</span>
-            <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-secondary ring-2 ring-surface-container-lowest" />
-          </button>
-
-          {/* AI Companion */}
-          <button
-            onClick={() => handleTabClick('companion')}
-            aria-label="Kairos AI Companion Chat"
-            className="relative min-w-[44px] min-h-[44px] w-12 h-12 flex items-center justify-center rounded-full text-on-surface-variant transition-all duration-300 hover:text-on-surface active:scale-95 cursor-pointer border-none bg-transparent"
-            type="button"
-          >
-            <span className="material-symbols-outlined text-headline-sm">auto_awesome</span>
-          </button>
-
-          {/* Squad Progression */}
-          <button
-            onClick={() => handleTabClick('squad')}
-            aria-label="Squad League & Challenges"
-            className="relative min-w-[44px] min-h-[44px] w-12 h-12 flex items-center justify-center rounded-full text-on-surface-variant transition-all duration-300 hover:text-on-surface active:scale-95 cursor-pointer border-none bg-transparent"
-            type="button"
-          >
-            <span className="material-symbols-outlined text-headline-sm">groups</span>
-          </button>
-
-          {/* Profile Active */}
-          <button
-            onClick={() => handleTabClick('profile')}
-            aria-label="Evolution Profile"
-            className="relative min-w-[44px] min-h-[44px] w-12 h-12 flex items-center justify-center rounded-full bg-gradient-to-tr from-primary to-primary-container text-on-primary shadow-[0_8px_20px_-2px_rgba(79,70,229,0.38)] transition-all duration-300 active:scale-95 cursor-pointer border-none"
-            type="button"
-          >
-            <span className="material-symbols-outlined text-headline-sm">person</span>
-          </button>
-        </div>
-      </nav>
 
       {/* ========================================================================= */}
       {/* SUB-MODALS & INTERACTIVE FLOWS */}
@@ -1123,7 +1218,7 @@ export function SettingsScreen({
                 {
                   id: 'Aura (Empathetic)',
                   title: 'Aura (Empathetic)',
-                  desc: 'Warm, intuitive mentor that balances compassion with motivational study cadences.',
+                  desc: 'Warm, intuitive mentor that balances compassion with motivational study routines.',
                   badge: 'Recommended'
                 },
                 {
@@ -1135,7 +1230,7 @@ export function SettingsScreen({
                 {
                   id: 'Orion (Strategist)',
                   title: 'Orion (Strategist)',
-                  desc: 'Action-oriented executive advisor prioritizing deadlines, velocity, and high-stakes rituals.',
+                  desc: 'Action-oriented executive advisor prioritizing deadlines, velocity, and high-stakes tasks.',
                   badge: 'Velocity'
                 },
                 {
@@ -1179,7 +1274,7 @@ export function SettingsScreen({
         </div>
       )}
 
-      {/* 2. Voice & Tone Cadence Picker */}
+      {/* 2. Voice & Tone Pace Picker */}
       {activeModal === 'voice' && (
         <div
           onClick={(e) => {
@@ -1194,7 +1289,7 @@ export function SettingsScreen({
                   <span className="material-symbols-outlined text-lg">graphic_eq</span>
                 </div>
                 <div>
-                  <h3 className="font-headline-sm text-base font-bold text-on-surface">Voice &amp; Tone Cadence</h3>
+                  <h3 className="font-headline-sm text-base font-bold text-on-surface">Voice &amp; Tone Pace</h3>
                   <span className="font-label-sm text-xs text-on-surface-variant">Synthesized Neural Acoustics</span>
                 </div>
               </div>
@@ -1210,14 +1305,14 @@ export function SettingsScreen({
             <div className="flex-1 overflow-y-auto pt-4 space-y-2.5">
               {[
                 { name: 'Sol', style: 'Warm Studio • Calming, measured rhythm with deep photonic warmth' },
-                { name: 'Aura', style: 'Crisp Natural • Resonant, empathetic cadence for reflective sessions' },
+                { name: 'Aura', style: 'Crisp Natural • Resonant, empathetic tone for reflective sessions' },
                 { name: 'Echo', style: 'Subtle Minimal • Low profile audio notes for deep flow periods' },
                 { name: 'Nova', style: 'High Energy • Crisp and assertive for morning velocity blocks' }
               ].map((v) => (
                 <div
                   key={v.name}
                   className={`w-full p-3.5 rounded-2xl border flex items-center justify-between gap-3 ${
-                    voiceCadence === v.name
+                    voiceTone === v.name
                       ? 'bg-secondary-fixed/30 border-secondary ring-1 ring-secondary'
                       : 'bg-surface-container-low border-surface-container-high/50'
                   }`}
@@ -1241,18 +1336,18 @@ export function SettingsScreen({
                     <button
                       onClick={() => {
                         triggerHaptic(ImpactStyle.Medium);
-                        setVoiceCadence(v.name);
+                        setVoiceTone(v.name);
                         setActiveModal(null);
                         showToast(`Voice set to ${v.name}`);
                       }}
                       className={`px-3 py-1.5 rounded-full text-xs font-bold cursor-pointer border-none ${
-                        voiceCadence === v.name
+                        voiceTone === v.name
                           ? 'bg-secondary text-on-secondary'
                           : 'bg-surface-container-high text-on-surface'
                       }`}
                       type="button"
                     >
-                      {voiceCadence === v.name ? 'Active' : 'Select'}
+                      {voiceTone === v.name ? 'Active' : 'Select'}
                     </button>
                   </div>
                 </div>
@@ -1278,7 +1373,7 @@ export function SettingsScreen({
                 </div>
                 <div>
                   <h3 className="font-headline-sm text-base font-bold text-on-surface">Proactivity Level</h3>
-                  <span className="font-label-sm text-xs text-on-surface-variant">Cadence Interrupt Frequency</span>
+                  <span className="font-label-sm text-xs text-on-surface-variant">Daily Interrupt Frequency</span>
                 </div>
               </div>
               <button
@@ -1337,6 +1432,240 @@ export function SettingsScreen({
         </div>
       )}
 
+      {/* 3.5 Default Task Timing Modal (Single View) */}
+      {activeModal === 'taskTiming' && (
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setActiveModal(null);
+          }}
+          className="fixed inset-0 z-50 flex items-end justify-center bg-on-background/60 backdrop-blur-md animate-fadeIn"
+        >
+          <div className="relative w-full max-w-[440px] max-h-[85vh] rounded-t-3xl bg-surface-container-lowest p-5 pb-8 shadow-2xl flex flex-col overflow-hidden border-t border-surface-container-high animate-slideUp">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-surface-container-high/40">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-full bg-primary-fixed flex items-center justify-center text-primary shadow-xs">
+                  <span className="material-symbols-outlined text-xl">schedule</span>
+                </div>
+                <div>
+                  <h3 className="font-headline-sm text-base font-bold text-on-surface">Default Task Timing</h3>
+                  <span className="font-label-sm text-xs text-on-surface-variant">Set standard task schedule &amp; duration</span>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveModal(null)}
+                className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-on-surface-variant hover:text-on-surface cursor-pointer border-none"
+                type="button"
+                id="btnCloseTaskTimingModal"
+              >
+                <span className="material-symbols-outlined text-lg">close</span>
+              </button>
+            </div>
+
+            {/* Single Scrollable Content */}
+            <div className="flex-1 overflow-y-auto pt-4 pb-2 space-y-4 mobile-scroll">
+              {/* 1. Default Task Timing Box (Start & End Time + Duration) */}
+              <div className="p-3.5 rounded-2xl bg-surface-container-low border border-surface-container-high/50 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-label-md text-xs font-bold text-on-surface uppercase tracking-wider">
+                    Default Task Time Window
+                  </span>
+                  <span className="text-xs font-bold text-primary px-2 py-0.5 rounded-full bg-primary-fixed">
+                    {formatTimeLabel(timingSettings.defaultTaskStartTime)} – {formatTimeLabel(calculateEndTime(timingSettings.defaultTaskStartTime, timingSettings.defaultTaskDurationMinutes))}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className="flex flex-col space-y-1 bg-surface-container-lowest p-2.5 rounded-xl border border-surface-container-high/50">
+                    <label className="text-[10px] text-on-surface-variant font-bold uppercase">Start Time</label>
+                    <input
+                      type="time"
+                      value={timingSettings.defaultTaskStartTime}
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          updateTimingDefaultStartTime(e.target.value);
+                        }
+                      }}
+                      className="bg-transparent text-on-surface text-sm font-bold border-none outline-none cursor-pointer"
+                    />
+                  </div>
+
+                  <div className="flex flex-col space-y-1 bg-surface-container-lowest p-2.5 rounded-xl border border-surface-container-high/50">
+                    <label className="text-[10px] text-on-surface-variant font-bold uppercase">Calculated End Time</label>
+                    <div className="text-sm font-bold text-on-surface flex items-center justify-between">
+                      <span>{formatTimeLabel(calculateEndTime(timingSettings.defaultTaskStartTime, timingSettings.defaultTaskDurationMinutes))}</span>
+                      <span className="text-[10px] font-semibold text-outline">({timingSettings.defaultTaskDurationMinutes}m)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Duration Chips */}
+                <div className="space-y-1.5 pt-1">
+                  <label className="text-[10px] text-on-surface-variant font-bold uppercase block">
+                    Default Task Duration
+                  </label>
+                  <div className="grid grid-cols-6 gap-1.5">
+                    {[15, 30, 45, 60, 90, 120].map((mins) => (
+                      <button
+                        key={mins}
+                        onClick={() => {
+                          triggerHaptic(ImpactStyle.Light);
+                          updateTimingDuration(mins);
+                          showToast(`Default duration: ${mins}m`);
+                        }}
+                        className={`py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border text-center ${
+                          timingSettings.defaultTaskDurationMinutes === mins
+                            ? 'bg-primary text-on-primary border-primary shadow-xs'
+                            : 'bg-surface-container text-on-surface border-surface-container-high/60 hover:bg-surface-container-high'
+                        }`}
+                        type="button"
+                      >
+                        {mins}m
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Quick Schedule Presets */}
+              <div className="p-3.5 rounded-2xl bg-surface-container-low border border-surface-container-high/50 space-y-2.5">
+                <label className="font-label-md text-xs font-bold text-on-surface uppercase tracking-wider block">
+                  Quick Rhythm Presets
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    {
+                      id: 'early_bird' as const,
+                      label: 'Early Bird',
+                      time: '08:00 AM',
+                      dur: '45m',
+                      icon: 'wb_sunny'
+                    },
+                    {
+                      id: 'balanced' as const,
+                      label: 'Balanced',
+                      time: '02:30 PM',
+                      dur: '60m',
+                      icon: 'schedule'
+                    },
+                    {
+                      id: 'night_owl' as const,
+                      label: 'Night Owl',
+                      time: '03:00 PM',
+                      dur: '60m',
+                      icon: 'bedtime'
+                    }
+                  ].map((p) => {
+                    const isSelected = timingSettings.preset === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => {
+                          triggerHaptic(ImpactStyle.Medium);
+                          applyTimingPreset(p.id);
+                          showToast(`Applied ${p.label} timing!`);
+                        }}
+                        className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                          isSelected
+                            ? 'bg-primary-fixed border-primary ring-1 ring-primary text-primary shadow-xs font-bold'
+                            : 'bg-surface-container-lowest border-surface-container-high/60 text-on-surface hover:bg-surface-container'
+                        }`}
+                        type="button"
+                      >
+                        <span className="material-symbols-outlined text-lg">{p.icon}</span>
+                        <span className="text-xs font-bold">{p.label}</span>
+                        <span className="text-[10px] text-outline">{p.time} • {p.dur}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 3. Routine Schedule Windows */}
+              <div className="p-3.5 rounded-2xl bg-surface-container-low border border-surface-container-high/50 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="font-label-md text-xs font-bold text-on-surface uppercase tracking-wider">
+                    Routine Day Windows
+                  </label>
+                  <span className="text-[10px] text-on-surface-variant font-medium">Auto-anchors system tasks</span>
+                </div>
+
+                <div className="space-y-2">
+                  {[
+                    { key: 'morning', label: '🌅 Morning Window', start: 'morningStart' as const, end: 'morningEnd' as const },
+                    { key: 'midday', label: '☀️ Midday & Lunch', start: 'middayStart' as const, end: 'middayEnd' as const },
+                    { key: 'evening', label: '🌆 Evening & Dinner', start: 'eveningStart' as const, end: 'eveningEnd' as const },
+                    { key: 'night', label: '🌌 Night Wind-Down', start: 'nightStart' as const, end: 'nightEnd' as const }
+                  ].map((win) => (
+                    <div
+                      key={win.key}
+                      className="flex items-center justify-between bg-surface-container-lowest p-2 rounded-xl border border-surface-container-high/50 text-xs"
+                    >
+                      <span className="font-semibold text-on-surface text-[11px]">{win.label}</span>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="time"
+                          value={timingSettings.routineWindows[win.start]}
+                          onChange={(e) => {
+                            updateTimingRoutineWindows({
+                              ...timingSettings.routineWindows,
+                              [win.start]: e.target.value
+                            });
+                          }}
+                          className="bg-surface-container px-1.5 py-0.5 rounded text-[11px] font-bold text-on-surface border-none outline-none cursor-pointer"
+                        />
+                        <span className="text-outline text-[10px]">to</span>
+                        <input
+                          type="time"
+                          value={timingSettings.routineWindows[win.end]}
+                          onChange={(e) => {
+                            updateTimingRoutineWindows({
+                              ...timingSettings.routineWindows,
+                              [win.end]: e.target.value
+                            });
+                          }}
+                          className="bg-surface-container px-1.5 py-0.5 rounded text-[11px] font-bold text-on-surface border-none outline-none cursor-pointer"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Bottom Actions */}
+            <div className="flex items-center gap-2 pt-3 border-t border-surface-container-high/40 mt-2 shrink-0">
+              <button
+                onClick={() => {
+                  triggerHaptic(ImpactStyle.Medium);
+                  resetTimingDefaults();
+                  showToast('Restored to default timing (60m)');
+                }}
+                className="py-2.5 px-4 rounded-full bg-surface-container text-on-surface font-label-md text-xs font-semibold hover:bg-surface-container-high active:scale-95 transition-all cursor-pointer border-none flex items-center gap-1.5"
+                type="button"
+                id="btnResetTaskTimingDefaults"
+              >
+                <span className="material-symbols-outlined text-sm">restart_alt</span>
+                Reset
+              </button>
+              <button
+                onClick={() => {
+                  triggerHaptic(ImpactStyle.Light);
+                  setActiveModal(null);
+                  showToast('Default task timing saved!');
+                }}
+                className="flex-1 py-2.5 rounded-full bg-primary text-on-primary font-label-md text-xs font-bold shadow-md shadow-primary/25 hover:bg-primary/90 active:scale-98 transition-all cursor-pointer border-none flex items-center justify-center gap-1.5"
+                type="button"
+                id="btnSaveTaskTimingModal"
+              >
+                <span className="material-symbols-outlined text-sm">check</span>
+                Save &amp; Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 4. Memory Vault Inspector */}
       {activeModal === 'vault' && (
         <div
@@ -1374,7 +1703,7 @@ export function SettingsScreen({
               <div className="space-y-2">
                 {[
                   { tag: 'Circadian', title: 'Peak Focus Schedule', value: 'Highest cognitive output observed between 8:30 AM – 11:30 AM' },
-                  { tag: 'Habit', title: 'Hydration Anchor', value: 'Drinks water before morning meditation rituals' },
+                  { tag: 'Habit', title: 'Hydration Anchor', value: 'Drinks water before morning meditation & tasks' },
                   { tag: 'Academic', title: 'Distributed Systems', value: 'Currently studying Raft consensus & Vector clocks' },
                   { tag: 'Squad', title: 'Podium Goal', value: 'Targeting Top 3 rank in Vanguard weekly leaderboard' }
                 ].map((item, idx) => (
@@ -1492,6 +1821,174 @@ export function SettingsScreen({
         </div>
       )}
 
+      {/* 6B. Downtime Protocol & Nightly Curfew Modal */}
+      {activeModal === 'downtime' && (
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setActiveModal(null);
+          }}
+          className="fixed inset-0 z-50 flex items-end justify-center bg-on-background/60 backdrop-blur-md animate-fadeIn"
+        >
+          <div className="relative w-full max-w-[440px] max-h-[85vh] rounded-t-3xl bg-surface-container-lowest p-5 pb-8 shadow-2xl flex flex-col overflow-hidden border-t border-surface-container-high animate-slideUp">
+            <div className="flex items-center justify-between pb-3 border-b border-surface-container-high/40">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-600">
+                  <span className="material-symbols-outlined text-lg">nights_stay</span>
+                </div>
+                <div>
+                  <h3 className="font-headline-sm text-base font-bold text-on-surface">Downtime Protocol</h3>
+                  <span className="font-label-sm text-xs text-on-surface-variant">Scheduled Nightly Digital Curfew</span>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveModal(null)}
+                className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-on-surface-variant hover:text-on-surface cursor-pointer border-none"
+                type="button"
+              >
+                <span className="material-symbols-outlined text-lg">close</span>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto pt-4 space-y-4 mobile-scroll">
+              {/* Master Toggle */}
+              <div className="p-3.5 rounded-2xl bg-surface-container-low flex items-center justify-between border border-surface-container-high/40">
+                <div className="flex flex-col">
+                  <span className="font-label-md text-xs font-bold text-on-surface">Engage Downtime Schedule</span>
+                  <span className="text-[11px] text-outline">Silence notifications and freeze non-vital apps</span>
+                </div>
+                <button
+                  aria-label="Toggle Downtime"
+                  className={`w-12 h-7 rounded-full flex items-center p-1 cursor-pointer transition-colors shadow-inner flex-shrink-0 border-none ${
+                    downtimeSettings.enabled ? 'bg-primary-container' : 'bg-surface-container-highest'
+                  }`}
+                  onClick={() => {
+                    triggerHaptic(ImpactStyle.Light);
+                    setDowntimeSettings((prev: any) => ({ ...prev, enabled: !prev.enabled }));
+                  }}
+                  type="button"
+                >
+                  <span
+                    className={`w-5 h-5 rounded-full bg-surface-container-lowest shadow-md transform transition-transform duration-200 ease-in-out ${
+                      downtimeSettings.enabled ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Time Range Pickers */}
+              <div className="p-3.5 rounded-2xl bg-surface-container-low flex flex-col gap-2.5 border border-surface-container-high/40">
+                <span className="font-label-sm text-xs font-bold text-on-surface">Curfew Window</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="p-2.5 rounded-xl bg-surface-container-lowest border border-surface-container-high/50 flex flex-col">
+                    <span className="text-[10px] text-outline font-semibold uppercase">Start Time</span>
+                    <input
+                      type="time"
+                      value={downtimeSettings.startTime}
+                      onChange={(e) =>
+                        setDowntimeSettings((prev: any) => ({ ...prev, startTime: e.target.value }))
+                      }
+                      className="bg-transparent text-sm font-bold text-on-surface outline-none border-none mt-1 cursor-pointer"
+                    />
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-surface-container-lowest border border-surface-container-high/50 flex flex-col">
+                    <span className="text-[10px] text-outline font-semibold uppercase">End Time</span>
+                    <input
+                      type="time"
+                      value={downtimeSettings.endTime}
+                      onChange={(e) =>
+                        setDowntimeSettings((prev: any) => ({ ...prev, endTime: e.target.value }))
+                      }
+                      className="bg-transparent text-sm font-bold text-on-surface outline-none border-none mt-1 cursor-pointer"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Strictness Mode */}
+              <div className="p-3.5 rounded-2xl bg-surface-container-low flex flex-col gap-2 border border-surface-container-high/40">
+                <span className="font-label-sm text-xs font-bold text-on-surface">Curfew Mode</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => {
+                      triggerHaptic(ImpactStyle.Light);
+                      setDowntimeSettings((prev: any) => ({ ...prev, mode: 'strict' }));
+                    }}
+                    type="button"
+                    className={`p-3 rounded-xl text-left border cursor-pointer transition-all ${
+                      downtimeSettings.mode === 'strict'
+                        ? 'bg-primary-fixed/30 border-primary ring-1 ring-primary'
+                        : 'bg-surface-container-lowest border-surface-container-high/50 hover:bg-surface-container'
+                    }`}
+                  >
+                    <span className="font-bold text-xs text-on-surface block">🔒 Strict Freeze</span>
+                    <span className="text-[10px] text-outline block mt-0.5">Block distracting apps entirely</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      triggerHaptic(ImpactStyle.Light);
+                      setDowntimeSettings((prev: any) => ({ ...prev, mode: 'gentle' }));
+                    }}
+                    type="button"
+                    className={`p-3 rounded-xl text-left border cursor-pointer transition-all ${
+                      downtimeSettings.mode === 'gentle'
+                        ? 'bg-primary-fixed/30 border-primary ring-1 ring-primary'
+                        : 'bg-surface-container-lowest border-surface-container-high/50 hover:bg-surface-container'
+                    }`}
+                  >
+                    <span className="font-bold text-xs text-on-surface block">🌙 Gentle Dimming</span>
+                    <span className="text-[10px] text-outline block mt-0.5">Soft reminder banner</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Active Days */}
+              <div className="p-3.5 rounded-2xl bg-surface-container-low flex flex-col gap-2 border border-surface-container-high/40">
+                <span className="font-label-sm text-xs font-bold text-on-surface">Active Schedule</span>
+                <div className="flex items-center gap-1.5">
+                  {[
+                    { id: 'everyday', label: 'Every Day' },
+                    { id: 'weekdays', label: 'Weekdays' },
+                    { id: 'weekends', label: 'Weekends' }
+                  ].map((d) => (
+                    <button
+                      key={d.id}
+                      onClick={() => {
+                        triggerHaptic(ImpactStyle.Light);
+                        setDowntimeSettings((prev: any) => ({ ...prev, days: d.id }));
+                      }}
+                      type="button"
+                      className={`flex-1 py-2 rounded-xl text-xs font-semibold cursor-pointer border transition-all ${
+                        downtimeSettings.days === d.id
+                          ? 'bg-primary text-on-primary border-primary shadow-xs'
+                          : 'bg-surface-container-lowest text-on-surface-variant border-surface-container-high hover:text-on-surface'
+                      }`}
+                    >
+                      {d.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Save Button */}
+              <button
+                onClick={() => {
+                  triggerHaptic(ImpactStyle.Light);
+                  setActiveModal(null);
+                  showToast('Downtime protocol settings saved!');
+                }}
+                className="w-full py-3 rounded-full bg-primary text-on-primary font-bold text-xs shadow-md shadow-primary/25 hover:bg-primary/90 active:scale-98 transition-all cursor-pointer border-none flex items-center justify-center gap-1.5"
+                type="button"
+              >
+                <span className="material-symbols-outlined text-sm">check</span>
+                <span>Save Downtime Schedule</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 7. Apple Health Diagnostics */}
       {activeModal === 'health' && (
         <div
@@ -1572,7 +2069,7 @@ export function SettingsScreen({
             <div className="flex-1 overflow-y-auto pt-4 space-y-2.5">
               {[
                 { email: userProfile?.email || 'alex.rivera@kairos.ai', type: 'Primary Academic' },
-                { email: 'alex.personal@gmail.com', type: 'Personal & Rituals' }
+                { email: 'alex.personal@gmail.com', type: 'Personal & Scheduled Tasks' }
               ].map((acc) => (
                 <div key={acc.email} className="p-3 rounded-2xl bg-surface-container-low flex items-center justify-between">
                   <div>
@@ -1599,7 +2096,7 @@ export function SettingsScreen({
         </div>
       )}
 
-      {/* 9. Squad Visibility Modal */}
+      {/* 9. Profile & Squad Visibility Modal */}
       {activeModal === 'visibility' && (
         <div
           onClick={(e) => {
@@ -1607,15 +2104,16 @@ export function SettingsScreen({
           }}
           className="fixed inset-0 z-50 flex items-end justify-center bg-on-background/60 backdrop-blur-md animate-fadeIn"
         >
-          <div className="relative w-full max-w-[440px] max-h-[85vh] rounded-t-3xl bg-surface-container-lowest p-5 pb-8 shadow-2xl flex flex-col overflow-hidden border-t border-surface-container-high animate-slideUp">
-            <div className="flex items-center justify-between pb-3 border-b border-surface-container-high/40">
+          <div className="relative w-full max-w-[440px] max-h-[88vh] rounded-t-3xl bg-surface-container-lowest p-5 pb-8 shadow-2xl flex flex-col overflow-hidden border-t border-surface-container-high animate-slideUp">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-surface-container-high/40 shrink-0">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center text-primary">
-                  <span className="material-symbols-outlined text-lg">group</span>
+                  <span className="material-symbols-outlined text-lg">shield_person</span>
                 </div>
                 <div>
-                  <h3 className="font-headline-sm text-base font-bold text-on-surface">Squad Visibility</h3>
-                  <span className="font-label-sm text-xs text-on-surface-variant">Leaderboard &amp; Study Room</span>
+                  <h3 className="font-headline-sm text-base font-bold text-on-surface">Profile &amp; Squad Visibility</h3>
+                  <span className="font-label-sm text-xs text-on-surface-variant">Control who sees your stats &amp; achievements</span>
                 </div>
               </div>
               <button
@@ -1627,36 +2125,159 @@ export function SettingsScreen({
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto pt-4 space-y-2.5">
-              {[
-                { id: 'Friends Only' as const, desc: 'Only approved friends in your squad see study hours & streak' },
-                { id: 'Public' as const, desc: 'Visible on global university & regional cadence leaderboards' },
-                { id: 'Ghost Mode' as const, desc: 'Completely anonymous; participate in challenges privately' }
-              ].map((v) => (
-                <button
-                  key={v.id}
-                  onClick={() => {
-                    triggerHaptic(ImpactStyle.Light);
-                    setSocialVisibility(v.id);
-                    setActiveModal(null);
-                    showToast(`Squad visibility set to ${v.id}`);
-                  }}
-                  className={`w-full p-3.5 rounded-2xl border text-left transition-all flex items-center justify-between cursor-pointer ${
-                    socialVisibility === v.id
-                      ? 'bg-primary-fixed/25 border-primary ring-1 ring-primary'
-                      : 'bg-surface-container-low border-surface-container-high/50 hover:bg-surface-container'
-                  }`}
-                  type="button"
-                >
-                  <div className="flex-1 min-w-0 pr-2">
-                    <h4 className="font-label-lg text-sm font-bold text-on-surface">{v.id}</h4>
-                    <p className="text-xs text-on-surface-variant mt-0.5">{v.desc}</p>
-                  </div>
-                  {socialVisibility === v.id && (
-                    <span className="material-symbols-outlined text-primary text-xl shrink-0">check_circle</span>
-                  )}
-                </button>
-              ))}
+            <div className="flex-1 overflow-y-auto pt-4 space-y-4 mobile-scroll">
+              {/* Audience Scope Section */}
+              <div className="flex flex-col space-y-2">
+                <span className="font-label-sm text-xs uppercase tracking-wider text-outline font-bold">
+                  Who Can View Your Evolution Profile
+                </span>
+
+                <div className="space-y-2">
+                  {[
+                    {
+                      id: 'Public' as const,
+                      title: 'Everyone in Kairos (Public)',
+                      desc: 'All teammates and squad leagues can view your full profile'
+                    },
+                    {
+                      id: 'Squad & Friends' as const,
+                      title: 'Squad & Friends (Recommended)',
+                      desc: 'Only approved friends and mutual squad members'
+                    },
+                    {
+                      id: 'Connections Only' as const,
+                      title: 'Connections Only',
+                      desc: 'Only directly accepted 1-on-1 connections'
+                    },
+                    {
+                      id: 'Private Account' as const,
+                      title: 'Private Account',
+                      desc: 'Displays only basic detail (Name & Level); hides tasks, HP & web graph'
+                    }
+                  ].map((v) => (
+                    <button
+                      key={v.id}
+                      onClick={() => {
+                        triggerHaptic(ImpactStyle.Light);
+                        setSocialVisibility(v.id);
+                      }}
+                      className={`w-full p-3 rounded-2xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
+                        socialVisibility === v.id
+                          ? 'bg-primary-fixed/20 border-primary ring-1 ring-primary/40'
+                          : 'bg-surface-container-low border-surface-container-high/50 hover:bg-surface-container'
+                      }`}
+                      type="button"
+                    >
+                      <div className="pt-0.5">
+                        <div
+                          className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                            socialVisibility === v.id
+                              ? 'border-primary bg-primary text-white'
+                              : 'border-slate-400 bg-white'
+                          }`}
+                        >
+                          {socialVisibility === v.id && (
+                            <div className="w-1.5 h-1.5 rounded-full bg-white" />
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-label-lg text-xs font-bold text-on-surface">{v.title}</h4>
+                        <p className="text-[11px] text-on-surface-variant mt-0.5">{v.desc}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Granular Visibility Toggles */}
+              <div className="flex flex-col space-y-2.5 pt-3 border-t border-surface-container-high/40">
+                <span className="font-label-sm text-xs uppercase tracking-wider text-outline font-bold">
+                  Profile Details &amp; Metrics Display
+                </span>
+
+                <div className="space-y-2">
+                  {[
+                    {
+                      key: 'showLevel' as const,
+                      label: 'Level & XP Progression',
+                      desc: 'Display current Level number and XP tier status'
+                    },
+                    {
+                      key: 'showMonthlyTasks' as const,
+                      label: 'Monthly Tasks Completed',
+                      desc: 'Display total count of completed daily & squad tasks'
+                    },
+                    {
+                      key: 'showMonthlyHp' as const,
+                      label: 'Total Monthly HP Earned',
+                      desc: 'Display squad spirit and health points earned this month'
+                    },
+                    {
+                      key: 'showWebGraph' as const,
+                      label: 'Monthly Web Graph (Radar Chart)',
+                      desc: 'Display 6-dimensional focus, circadian, and consistency matrix'
+                    },
+                    {
+                      key: 'showTopAchievements' as const,
+                      label: 'Top 5 Achievements Showcase',
+                      desc: 'Display your top unlocked medals, badges, and rarity tiers'
+                    },
+                    {
+                      key: 'showLivePresence' as const,
+                      label: 'Live Focus & Deep Work Presence',
+                      desc: 'Show when you are actively inside a Pomodoro or focus sprint'
+                    }
+                  ].map((item) => {
+                    const isChecked = visibilitySettings[item.key];
+                    return (
+                      <div
+                        key={item.key}
+                        className="p-3 rounded-2xl bg-surface-container-low border border-surface-container-high/50 flex items-center justify-between gap-3"
+                      >
+                        <div className="flex flex-col min-w-0 text-left">
+                          <span className="font-label-lg text-xs font-bold text-on-surface">{item.label}</span>
+                          <span className="text-[10px] text-on-surface-variant mt-0.5">
+                            {item.desc}
+                          </span>
+                        </div>
+
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              triggerHaptic(ImpactStyle.Light);
+                              setVisibilitySettings((prev) => ({
+                                ...prev,
+                                [item.key]: e.target.checked
+                              }));
+                            }}
+                            className="sr-only peer"
+                          />
+                          <div className="w-10 h-5.5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4.5 after:w-4.5 after:transition-all peer-checked:bg-primary shadow-inner" />
+                        </label>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Save Button */}
+            <div className="pt-3 border-t border-surface-container-high/40 shrink-0">
+              <button
+                onClick={() => {
+                  triggerHaptic(ImpactStyle.Medium);
+                  setActiveModal(null);
+                  showToast(`🔒 Profile visibility updated to "${socialVisibility}"`);
+                }}
+                className="w-full py-2.5 rounded-full bg-primary text-on-primary font-bold text-xs cursor-pointer border-none shadow-md shadow-primary/20 active:scale-95 transition-all flex items-center justify-center gap-1.5"
+                type="button"
+              >
+                <span className="material-symbols-outlined text-[16px]">check</span>
+                <span>Save Visibility Preferences</span>
+              </button>
             </div>
           </div>
         </div>
@@ -1676,7 +2297,7 @@ export function SettingsScreen({
             </div>
             <h3 className="text-base font-bold text-on-surface">Export Vault Archive</h3>
             <p className="text-xs text-on-surface-variant mt-2 px-1 leading-relaxed">
-              Generate a portable backup of your complete neural memory vault, ritual stats, and quiz history.
+              Generate a portable backup of your complete neural memory vault, task stats, and quiz history.
             </p>
             <div className="mt-4 flex flex-col gap-2 w-full">
               <button
@@ -1876,7 +2497,7 @@ export function SettingsScreen({
             </div>
             <h3 className="text-base font-bold text-error">Permanently Purge Vault?</h3>
             <p className="text-xs text-on-surface-variant mt-2 px-1 leading-relaxed">
-              This action cannot be undone. All indexed cognitive memories, habit cadences, and squad league trophies will be deleted immediately.
+              This action cannot be undone. All indexed cognitive memories, habit routines, and squad league trophies will be deleted immediately.
             </p>
             <div className="mt-4 flex items-center gap-2 w-full">
               <button
@@ -1890,6 +2511,12 @@ export function SettingsScreen({
                 onClick={() => {
                   triggerHaptic(ImpactStyle.Heavy);
                   setActiveModal(null);
+                  clearUserScopedData(userProfile);
+                  progressionManager.resetSession();
+                  squadService.resetSession();
+                  resetFocusSessions();
+                  resetUserTasks();
+                  clearActiveUser();
                   if (onLogOut) {
                     onLogOut();
                   } else if (onNavigateTab) {

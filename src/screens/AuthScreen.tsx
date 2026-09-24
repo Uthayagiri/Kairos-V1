@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { authApi } from '../features/auth/authApi';
+import { NetworkError } from '../features/api/errors/apiErrors';
 
 interface AuthScreenProps {
   onBack: () => void;
@@ -47,7 +49,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
     }, 600);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       Haptics.impact({ style: ImpactStyle.Medium }).catch(() => {});
@@ -55,18 +57,66 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
       // Fallback
     }
 
+    const trimmedEmail = email.trim();
+    const trimmedPassword = password.trim();
+
+    if (!trimmedEmail || !trimmedPassword) {
+      setFeedbackMsg('Please enter your email and password to continue.');
+      return;
+    }
+
     setIsLoading(true);
     setFeedbackMsg(null);
 
-    setTimeout(() => {
-      setIsLoading(false);
-      if (onSuccess) {
-        onSuccess({
-          email: email.trim() || 'alex@kairos.ai',
-          name: (email.trim() ? email.trim().split('@')[0] : 'Alex') || 'Alex'
+    try {
+      if (mode === 'create') {
+        const res = await authApi.register({
+          email: trimmedEmail,
+          password: trimmedPassword,
+          name: trimmedEmail.split('@')[0]
         });
+        setIsLoading(false);
+        setIsSuccess(true);
+        if (onSuccess) {
+          onSuccess({
+            email: res.user.email,
+            name: res.user.profile?.name || res.user.email.split('@')[0]
+          });
+        }
+        return;
+      } else {
+        const res = await authApi.login({
+          email: trimmedEmail,
+          password: trimmedPassword
+        });
+        setIsLoading(false);
+        setIsSuccess(true);
+        if (onSuccess) {
+          onSuccess({
+            email: res.user.email,
+            name: res.user.profile?.name || res.user.email.split('@')[0]
+          });
+        }
+        return;
       }
-    }, 400);
+    } catch (err: any) {
+      setIsLoading(false);
+
+      // If backend is offline or unreachable, gracefully fall back to local/offline session
+      if (err instanceof NetworkError || err.message?.includes('Network') || err.message?.includes('fetch')) {
+        if (onSuccess) {
+          onSuccess({
+            email: trimmedEmail,
+            name: trimmedEmail.split('@')[0] || 'Voyager'
+          });
+        }
+        return;
+      }
+
+      // Show invalid credentials or validation message to user
+      setFeedbackMsg(err.message || 'Authentication failed. Please check your credentials.');
+      return;
+    }
   };
 
   return (
@@ -147,8 +197,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
             </h1>
             <p className="text-sm text-on-surface-variant leading-normal">
               {mode === 'create'
-                ? 'Your private sanctuary for memories, routines, and cadence analytics.'
-                : 'Access your private sanctuary for memories, routines, and cadence analytics.'}
+                ? 'Your private sanctuary for memories, routines, and flow analytics.'
+                : 'Access your private sanctuary for memories, routines, and flow analytics.'}
             </p>
           </div>
 
@@ -222,7 +272,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
                 <input
                   className="w-full h-12 pl-11 pr-4 rounded-xl bg-surface-container-lowest text-on-surface text-base placeholder-outline/70 border border-outline-variant/30 focus:border-primary focus:ring-2 focus:ring-primary/20 focus:outline-none shadow-xs transition-all"
                   id="email-input"
-                  placeholder="your.cadence@domain.com"
+                  placeholder="your.flow@domain.com"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -321,7 +371,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
           <p className="text-[11px] text-outline leading-normal">
             By continuing, you agree to Kairos's{' '}
             <a className="text-primary underline font-medium" href="#terms" onClick={(e) => e.preventDefault()}>
-              Terms of Cadence
+              Terms of Service
             </a>{' '}
             and{' '}
             <a className="text-primary underline font-medium" href="#privacy" onClick={(e) => e.preventDefault()}>

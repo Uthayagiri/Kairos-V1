@@ -8,6 +8,22 @@ export * from './components/AchievementModel';
 export * from './components/GlowController';
 export * from './components/AchievementParticles';
 export * from './components/UnlockAnimation';
+export * from './components/CardBadgePreview';
+export * from './components/PhoenixWingsMedalAnimation';
+
+// 3D Engine Subsystem
+export * from './3d/AchievementViewer';
+export * from './3d/rarityConfig';
+export * from './3d/CurvedTextRing';
+export * from './3d/AuraShell';
+export * from './3d/useUnlockAnimation';
+export {
+  AchievementModel as GLBAchievementModel,
+  type AchievementModelProps as GLBAchievementModelProps
+} from './3d/AchievementModel';
+export {
+  AchievementParticles as GLBAchievementParticles
+} from './3d/AchievementParticles';
 
 // Data
 export * from './data/achievements';
