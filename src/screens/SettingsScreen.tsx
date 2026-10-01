@@ -21,9 +21,12 @@ import {
   clearActiveUser
 } from '../features/storage';
 import { squadService } from '../features/squad';
+import { authApi } from '../features/auth/authApi';
+import { authSession } from '../features/auth/authSession';
+import { clearUserSyncStorage } from '../features/sync/syncStorage';
 
 interface SettingsScreenProps {
-  userProfile?: { email: string; name: string } | null;
+  userProfile?: { id?: string; email: string; name: string; avatarUrl?: string | null; onboardingCompleted?: boolean } | null;
   onBack?: () => void;
   onNavigateTab?: (tab: string) => void;
   onLogOut?: () => void;
@@ -51,22 +54,55 @@ export function SettingsScreen({
     resetDefaults: resetTimingDefaults
   } = useTaskTimingSettings();
 
+  // User Settings Preferences (persisted in user-scoped storage)
+  const [settingsPrefs, setSettingsPrefs] = useState(() => {
+    try {
+      const saved = getUserScopedJSON<any>(STORAGE_DOMAINS.SETTINGS_PREFERENCES, null, userProfile);
+      if (saved && typeof saved === 'object') {
+        return saved;
+      }
+    } catch {}
+    return {
+      deepThinkEnabled: true,
+      autoExtractEnabled: true,
+      circadianSyncEnabled: true,
+      taskRemindersEnabled: true,
+      appLockEnabled: true,
+      incognitoEnabled: false,
+      hapticsEnabled: true,
+      persona: 'Aura (Empathetic)',
+      voiceTone: 'Sol',
+      proactivityLevel: 'Gentle' as 'Gentle' | 'Balanced' | 'Intense',
+      restWindow: '11PM - 7AM',
+      socialVisibility: 'Squad & Friends' as 'Squad & Friends' | 'Public' | 'Connections Only' | 'Private Account',
+      visibilitySettings: {
+        showLevel: true,
+        showMonthlyTasks: true,
+        showMonthlyHp: true,
+        showWebGraph: true,
+        showTopAchievements: true,
+        showLivePresence: true
+      },
+      appearanceMode: 'Auto Light' as 'Auto Light' | 'Pure Dark' | 'Solar Circadian'
+    };
+  });
+
   // Toggles state
-  const [deepThinkEnabled, setDeepThinkEnabled] = useState(true);
-  const [autoExtractEnabled, setAutoExtractEnabled] = useState(true);
-  const [circadianSyncEnabled, setCircadianSyncEnabled] = useState(true);
-  const [taskRemindersEnabled, setTaskRemindersEnabled] = useState(true);
-  const [appLockEnabled, setAppLockEnabled] = useState(true);
-  const [incognitoEnabled, setIncognitoEnabled] = useState(false);
-  const [hapticsEnabled, setHapticsEnabled] = useState(true);
+  const [deepThinkEnabled, setDeepThinkEnabled] = useState(settingsPrefs.deepThinkEnabled ?? true);
+  const [autoExtractEnabled, setAutoExtractEnabled] = useState(settingsPrefs.autoExtractEnabled ?? true);
+  const [circadianSyncEnabled, setCircadianSyncEnabled] = useState(settingsPrefs.circadianSyncEnabled ?? true);
+  const [taskRemindersEnabled, setTaskRemindersEnabled] = useState(settingsPrefs.taskRemindersEnabled ?? true);
+  const [appLockEnabled, setAppLockEnabled] = useState(settingsPrefs.appLockEnabled ?? true);
+  const [incognitoEnabled, setIncognitoEnabled] = useState(settingsPrefs.incognitoEnabled ?? false);
+  const [hapticsEnabled, setHapticsEnabled] = useState(settingsPrefs.hapticsEnabled ?? true);
 
   // Preference Values
-  const [persona, setPersona] = useState('Aura (Empathetic)');
-  const [voiceTone, setVoiceTone] = useState('Sol');
-  const [proactivityLevel, setProactivityLevel] = useState<'Gentle' | 'Balanced' | 'Intense'>('Gentle');
-  const [restWindow, setRestWindow] = useState('11PM - 7AM');
-  const [socialVisibility, setSocialVisibility] = useState<'Squad & Friends' | 'Public' | 'Connections Only' | 'Private Account'>('Squad & Friends');
-  const [visibilitySettings, setVisibilitySettings] = useState({
+  const [persona, setPersona] = useState(settingsPrefs.persona || 'Aura (Empathetic)');
+  const [voiceTone, setVoiceTone] = useState(settingsPrefs.voiceTone || 'Sol');
+  const [proactivityLevel, setProactivityLevel] = useState<'Gentle' | 'Balanced' | 'Intense'>(settingsPrefs.proactivityLevel || 'Gentle');
+  const [restWindow, setRestWindow] = useState(settingsPrefs.restWindow || '11PM - 7AM');
+  const [socialVisibility, setSocialVisibility] = useState<'Squad & Friends' | 'Public' | 'Connections Only' | 'Private Account'>(settingsPrefs.socialVisibility || 'Squad & Friends');
+  const [visibilitySettings, setVisibilitySettings] = useState(settingsPrefs.visibilitySettings || {
     showLevel: true,
     showMonthlyTasks: true,
     showMonthlyHp: true,
@@ -74,14 +110,63 @@ export function SettingsScreen({
     showTopAchievements: true,
     showLivePresence: true
   });
-  const [appearanceMode, setAppearanceMode] = useState<'Auto Light' | 'Pure Dark' | 'Solar Circadian'>('Auto Light');
+  const [appearanceMode, setAppearanceMode] = useState<'Auto Light' | 'Pure Dark' | 'Solar Circadian'>(settingsPrefs.appearanceMode || 'Auto Light');
   const [cacheSize, setCacheSize] = useState('142 MB');
   const [isClearingCache, setIsClearingCache] = useState(false);
+
+  // Synchronize preferences when user context changes
+  useEffect(() => {
+    try {
+      const saved = getUserScopedJSON<any>(STORAGE_DOMAINS.SETTINGS_PREFERENCES, null, userProfile);
+      if (saved && typeof saved === 'object') {
+        setSettingsPrefs(saved);
+        if (saved.deepThinkEnabled !== undefined) setDeepThinkEnabled(saved.deepThinkEnabled);
+        if (saved.autoExtractEnabled !== undefined) setAutoExtractEnabled(saved.autoExtractEnabled);
+        if (saved.circadianSyncEnabled !== undefined) setCircadianSyncEnabled(saved.circadianSyncEnabled);
+        if (saved.taskRemindersEnabled !== undefined) setTaskRemindersEnabled(saved.taskRemindersEnabled);
+        if (saved.appLockEnabled !== undefined) setAppLockEnabled(saved.appLockEnabled);
+        if (saved.incognitoEnabled !== undefined) setIncognitoEnabled(saved.incognitoEnabled);
+        if (saved.hapticsEnabled !== undefined) setHapticsEnabled(saved.hapticsEnabled);
+        if (saved.persona) setPersona(saved.persona);
+        if (saved.voiceTone) setVoiceTone(saved.voiceTone);
+        if (saved.proactivityLevel) setProactivityLevel(saved.proactivityLevel);
+        if (saved.restWindow) setRestWindow(saved.restWindow);
+        if (saved.socialVisibility) setSocialVisibility(saved.socialVisibility);
+        if (saved.visibilitySettings) setVisibilitySettings(saved.visibilitySettings);
+        if (saved.appearanceMode) setAppearanceMode(saved.appearanceMode);
+      }
+    } catch {}
+  }, [userProfile]);
+
+  // Persist updated preferences to user-scoped storage
+  const savePreferences = (updates: Partial<typeof settingsPrefs>) => {
+    const updated = {
+      deepThinkEnabled,
+      autoExtractEnabled,
+      circadianSyncEnabled,
+      taskRemindersEnabled,
+      appLockEnabled,
+      incognitoEnabled,
+      hapticsEnabled,
+      persona,
+      voiceTone,
+      proactivityLevel,
+      restWindow,
+      socialVisibility,
+      visibilitySettings,
+      appearanceMode,
+      ...updates
+    };
+    setSettingsPrefs(updated);
+    try {
+      setUserScopedJSON(STORAGE_DOMAINS.SETTINGS_PREFERENCES, updated, userProfile);
+    } catch {}
+  };
 
   // Downtime Protocol & Nightly Curfew State
   const [downtimeSettings, setDowntimeSettings] = useState(() => {
     try {
-      const saved = getUserScopedJSON<any>(STORAGE_DOMAINS.DOWNTIME_SETTINGS, null);
+      const saved = getUserScopedJSON<any>(STORAGE_DOMAINS.DOWNTIME_SETTINGS, null, userProfile);
       if (saved) {
         return saved;
       }
@@ -98,11 +183,11 @@ export function SettingsScreen({
   // Save Downtime Settings
   useEffect(() => {
     try {
-      setUserScopedJSON(STORAGE_DOMAINS.DOWNTIME_SETTINGS, downtimeSettings);
+      setUserScopedJSON(STORAGE_DOMAINS.DOWNTIME_SETTINGS, downtimeSettings, userProfile);
     } catch {
       // ignore
     }
-  }, [downtimeSettings]);
+  }, [downtimeSettings, userProfile]);
 
   // Modals state
   const [activeModal, setActiveModal] = useState<
@@ -444,9 +529,11 @@ export function SettingsScreen({
                           }`}
                           onClick={() => {
                             triggerHaptic(ImpactStyle.Light);
-                            setDeepThinkEnabled(!deepThinkEnabled);
+                            const nextVal = !deepThinkEnabled;
+                            setDeepThinkEnabled(nextVal);
+                            savePreferences({ deepThinkEnabled: nextVal });
                             showToast(
-                              !deepThinkEnabled
+                              nextVal
                                 ? 'Deep Think 2.5 Pro enabled for complex reasoning'
                                 : 'Deep Think disabled (Fast synthesis active)'
                             );
@@ -525,9 +612,11 @@ export function SettingsScreen({
                           }`}
                           onClick={() => {
                             triggerHaptic(ImpactStyle.Light);
-                            setAutoExtractEnabled(!autoExtractEnabled);
+                            const nextVal = !autoExtractEnabled;
+                            setAutoExtractEnabled(nextVal);
+                            savePreferences({ autoExtractEnabled: nextVal });
                             showToast(
-                              !autoExtractEnabled
+                              nextVal
                                 ? 'Insight auto-extraction active'
                                 : 'Insight extraction paused'
                             );
@@ -603,9 +692,11 @@ export function SettingsScreen({
                           }`}
                           onClick={() => {
                             triggerHaptic(ImpactStyle.Light);
-                            setCircadianSyncEnabled(!circadianSyncEnabled);
+                            const nextVal = !circadianSyncEnabled;
+                            setCircadianSyncEnabled(nextVal);
+                            savePreferences({ circadianSyncEnabled: nextVal });
                             showToast(
-                              !circadianSyncEnabled
+                              nextVal
                                 ? 'Circadian synchronization active'
                                 : 'Circadian alerts disabled'
                             );
@@ -772,9 +863,11 @@ export function SettingsScreen({
                           }`}
                           onClick={() => {
                             triggerHaptic(ImpactStyle.Light);
-                            setTaskRemindersEnabled(!taskRemindersEnabled);
+                            const nextVal = !taskRemindersEnabled;
+                            setTaskRemindersEnabled(nextVal);
+                            savePreferences({ taskRemindersEnabled: nextVal });
                             showToast(
-                              !taskRemindersEnabled
+                              nextVal
                                 ? 'Task reminders enabled'
                                 : 'Task reminders silenced'
                             );
@@ -919,9 +1012,11 @@ export function SettingsScreen({
                           }`}
                           onClick={() => {
                             triggerHaptic(ImpactStyle.Light);
-                            setAppLockEnabled(!appLockEnabled);
+                            const nextVal = !appLockEnabled;
+                            setAppLockEnabled(nextVal);
+                            savePreferences({ appLockEnabled: nextVal });
                             showToast(
-                              !appLockEnabled
+                              nextVal
                                 ? 'Biometric biometric lock engaged'
                                 : 'App lock requirement removed'
                             );
@@ -958,9 +1053,11 @@ export function SettingsScreen({
                           }`}
                           onClick={() => {
                             triggerHaptic(ImpactStyle.Light);
-                            setIncognitoEnabled(!incognitoEnabled);
+                            const nextVal = !incognitoEnabled;
+                            setIncognitoEnabled(nextVal);
+                            savePreferences({ incognitoEnabled: nextVal });
                             showToast(
-                              !incognitoEnabled
+                              nextVal
                                 ? 'Incognito Mode active (Sessions unindexed)'
                                 : 'Standard indexing resumed'
                             );
@@ -1062,16 +1159,18 @@ export function SettingsScreen({
                             hapticsEnabled ? 'bg-primary-container' : 'bg-surface-container-highest'
                           }`}
                           onClick={() => {
-                            if (!hapticsEnabled) {
+                            const nextVal = !hapticsEnabled;
+                            if (nextVal) {
                               try {
                                 Haptics.impact({ style: ImpactStyle.Medium }).catch(() => {});
                               } catch {
                                 // ignore
                               }
                             }
-                            setHapticsEnabled(!hapticsEnabled);
+                            setHapticsEnabled(nextVal);
+                            savePreferences({ hapticsEnabled: nextVal });
                             showToast(
-                              !hapticsEnabled
+                              nextVal
                                 ? 'Haptic feedback enabled'
                                 : 'Haptic feedback silenced'
                             );
@@ -1245,6 +1344,7 @@ export function SettingsScreen({
                   onClick={() => {
                     triggerHaptic(ImpactStyle.Light);
                     setPersona(item.id);
+                    savePreferences({ persona: item.id });
                     setActiveModal(null);
                     showToast(`Companion persona set to ${item.id}`);
                   }}
@@ -1337,6 +1437,7 @@ export function SettingsScreen({
                       onClick={() => {
                         triggerHaptic(ImpactStyle.Medium);
                         setVoiceTone(v.name);
+                        savePreferences({ voiceTone: v.name });
                         setActiveModal(null);
                         showToast(`Voice set to ${v.name}`);
                       }}
@@ -1408,6 +1509,7 @@ export function SettingsScreen({
                   onClick={() => {
                     triggerHaptic(ImpactStyle.Light);
                     setProactivityLevel(p.id);
+                    savePreferences({ proactivityLevel: p.id });
                     setActiveModal(null);
                     showToast(`Proactivity level set to ${p.id}`);
                   }}
@@ -1800,6 +1902,7 @@ export function SettingsScreen({
                   onClick={() => {
                     triggerHaptic(ImpactStyle.Light);
                     setRestWindow(opt.value);
+                    savePreferences({ restWindow: opt.value });
                     setActiveModal(null);
                     showToast(`Rest window set to ${opt.value}`);
                   }}
@@ -2068,8 +2171,7 @@ export function SettingsScreen({
 
             <div className="flex-1 overflow-y-auto pt-4 space-y-2.5">
               {[
-                { email: userProfile?.email || 'alex.rivera@kairos.ai', type: 'Primary Academic' },
-                { email: 'alex.personal@gmail.com', type: 'Personal & Scheduled Tasks' }
+                { email: userProfile?.email || 'user@kairos.ai', type: 'Primary Account' }
               ].map((acc) => (
                 <div key={acc.email} className="p-3 rounded-2xl bg-surface-container-low flex items-center justify-between">
                   <div>
@@ -2160,6 +2262,7 @@ export function SettingsScreen({
                       onClick={() => {
                         triggerHaptic(ImpactStyle.Light);
                         setSocialVisibility(v.id);
+                        savePreferences({ socialVisibility: v.id });
                       }}
                       className={`w-full p-3 rounded-2xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
                         socialVisibility === v.id
@@ -2248,10 +2351,12 @@ export function SettingsScreen({
                             checked={isChecked}
                             onChange={(e) => {
                               triggerHaptic(ImpactStyle.Light);
-                              setVisibilitySettings((prev) => ({
-                                ...prev,
+                              const updated = {
+                                ...visibilitySettings,
                                 [item.key]: e.target.checked
-                              }));
+                              };
+                              setVisibilitySettings(updated);
+                              savePreferences({ visibilitySettings: updated });
                             }}
                             className="sr-only peer"
                           />
@@ -2269,6 +2374,7 @@ export function SettingsScreen({
               <button
                 onClick={() => {
                   triggerHaptic(ImpactStyle.Medium);
+                  savePreferences({ socialVisibility, visibilitySettings });
                   setActiveModal(null);
                   showToast(`🔒 Profile visibility updated to "${socialVisibility}"`);
                 }}
@@ -2365,6 +2471,7 @@ export function SettingsScreen({
                   onClick={() => {
                     triggerHaptic(ImpactStyle.Light);
                     setAppearanceMode(theme.id);
+                    savePreferences({ appearanceMode: theme.id });
                     setActiveModal(null);
                     showToast(`Appearance theme changed to ${theme.label}`);
                   }}
@@ -2508,19 +2615,26 @@ export function SettingsScreen({
                 Cancel
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   triggerHaptic(ImpactStyle.Heavy);
                   setActiveModal(null);
-                  clearUserScopedData(userProfile);
-                  progressionManager.resetSession();
-                  squadService.resetSession();
-                  resetFocusSessions();
-                  resetUserTasks();
-                  clearActiveUser();
-                  if (onLogOut) {
-                    onLogOut();
-                  } else if (onNavigateTab) {
-                    onNavigateTab('meet-kairos');
+                  try {
+                    await authApi.deleteAccount();
+                    clearUserScopedData(userProfile);
+                    clearUserSyncStorage();
+                    progressionManager.resetSession();
+                    squadService.resetSession();
+                    resetFocusSessions();
+                    resetUserTasks();
+                    authSession.clearSession();
+                    clearActiveUser();
+                    if (onLogOut) {
+                      onLogOut();
+                    } else if (onNavigateTab) {
+                      onNavigateTab('meet-kairos');
+                    }
+                  } catch (err: any) {
+                    showToast('Cannot delete account while offline. Please connect to the internet.');
                   }
                 }}
                 className="flex-1 py-2.5 rounded-full bg-error text-on-error font-semibold text-xs cursor-pointer border-none shadow-md shadow-error/20"

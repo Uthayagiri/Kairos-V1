@@ -1,14 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { authApi } from '../features/auth/authApi';
 import { NetworkError } from '../features/api/errors/apiErrors';
 
 interface AuthScreenProps {
   onBack: () => void;
-  onSuccess?: (user: { email: string; name: string }) => void;
+  onSuccess?: (user: { id: string; email: string; name: string; onboardingCompleted?: boolean; avatarUrl?: string | null }) => void;
 }
 
 type AuthMode = 'create' | 'login';
+
+// Module-level singletons to guarantee initialize is called strictly once across all renders/remounts
+let globalGisInitializedClientId: string | null = null;
+let activeGoogleCallback: ((response: any) => void) | null = null;
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => {
   const [mode, setMode] = useState<AuthMode>('create');
@@ -18,6 +22,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
+
+  const googleButtonContainerRef = useRef<HTMLDivElement | null>(null);
+  const isGoogleAuthInProgressRef = useRef<boolean>(false);
 
   const toggleAuthMode = (newMode: AuthMode) => {
     try {
@@ -29,24 +36,148 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
     setFeedbackMsg(null);
   };
 
-  const handleSocialAuth = (provider: 'Apple' | 'Google') => {
-    try {
-      Haptics.impact({ style: ImpactStyle.Medium }).catch(() => { });
-    } catch {
-      // Fallback
-    }
-    setIsLoading(true);
-    setFeedbackMsg(`Connecting to ${provider}...`);
+  /**
+   * Authoritative credential callback triggered by Google Identity Services popup
+   */
+  const handleGoogleCredentialResponse = useCallback(
+    async (response: any) => {
+      if (isGoogleAuthInProgressRef.current) return;
+      isGoogleAuthInProgressRef.current = true;
 
-    setTimeout(() => {
-      setIsLoading(false);
-      if (onSuccess) {
-        onSuccess({
-          email: provider === 'Apple' ? 'user@icloud.com' : 'user@gmail.com',
-          name: `${provider} User`
+      try {
+        if (!response || !response.credential) {
+          throw new Error('No credential returned from Google account selection.');
+        }
+
+        setIsLoading(true);
+        setFeedbackMsg('Verifying Google credentials with Kairos backend...');
+
+        const res = await authApi.loginWithGoogle({
+          idToken: response.credential
         });
+
+        setIsLoading(false);
+        setFeedbackMsg(null);
+
+        if (onSuccess && res.user) {
+          onSuccess({
+            id: res.user.id,
+            email: res.user.email,
+            name: res.user.profile?.name || res.user.email.split('@')[0],
+            onboardingCompleted: Boolean(res.user.profile?.onboardingCompleted),
+            avatarUrl: res.user.profile?.avatarUrl ?? null
+          });
+        }
+      } catch (err: any) {
+        setIsLoading(false);
+        setFeedbackMsg(err.message || 'Google authentication failed. Please try again.');
+      } finally {
+        isGoogleAuthInProgressRef.current = false;
       }
-    }, 600);
+    },
+    [onSuccess]
+  );
+
+  // Keep active callback reference up to date without re-initializing GIS
+  useEffect(() => {
+    activeGoogleCallback = handleGoogleCredentialResponse;
+    return () => {
+      activeGoogleCallback = null;
+    };
+  }, [handleGoogleCredentialResponse]);
+
+  /**
+   * Single, idempotent GIS initialization & button rendering lifecycle
+   */
+  useEffect(() => {
+    let isMounted = true;
+
+    const googleClientId =
+      (import.meta as any)?.env?.VITE_GOOGLE_CLIENT_ID ||
+      '138279147054-8po60obfaprn2c35o7lfueu3755akqgs.apps.googleusercontent.com';
+
+    if (!googleClientId) return;
+
+    const renderGoogleButton = () => {
+      if (!isMounted || !googleButtonContainerRef.current) return;
+      const googleObj = (window as any).google;
+      if (!googleObj?.accounts?.id) return;
+
+      try {
+        // Initialize GIS strictly once per clientId across the app lifetime
+        if (globalGisInitializedClientId !== googleClientId) {
+          googleObj.accounts.id.initialize({
+            client_id: googleClientId,
+            callback: (resp: any) => {
+              if (activeGoogleCallback) {
+                activeGoogleCallback(resp);
+              }
+            },
+            auto_select: false,
+            cancel_on_tap_outside: true
+          });
+          globalGisInitializedClientId = googleClientId;
+        }
+
+        // Render official button into pure leaf DOM container (which has NO React children)
+        if (googleButtonContainerRef.current) {
+          while (googleButtonContainerRef.current.firstChild) {
+            googleButtonContainerRef.current.removeChild(googleButtonContainerRef.current.firstChild);
+          }
+          googleObj.accounts.id.renderButton(googleButtonContainerRef.current, {
+            type: 'standard',
+            theme: 'outline',
+            size: 'large',
+            text: mode === 'create' ? 'signup_with' : 'signin_with',
+            shape: 'rectangular',
+            logo_alignment: 'left',
+            width: 175
+          });
+        }
+      } catch (err) {
+        console.warn('Google Identity Services render warning:', err);
+      }
+    };
+
+    if ((window as any).google?.accounts?.id) {
+      renderGoogleButton();
+    } else {
+      const checkScript = () => {
+        if ((window as any).google?.accounts?.id) {
+          renderGoogleButton();
+        }
+      };
+
+      const existingScript = document.querySelector('script[src*="accounts.google.com/gsi/client"]');
+      if (existingScript) {
+        existingScript.addEventListener('load', checkScript);
+      }
+
+      const pollInterval = setInterval(() => {
+        if ((window as any).google?.accounts?.id) {
+          clearInterval(pollInterval);
+          renderGoogleButton();
+        }
+      }, 200);
+
+      return () => {
+        isMounted = false;
+        clearInterval(pollInterval);
+        if (existingScript) {
+          existingScript.removeEventListener('load', checkScript);
+        }
+      };
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [mode]);
+
+  const handleSocialAuth = (provider: 'Apple' | 'Google') => {
+    if (provider === 'Apple') {
+      setFeedbackMsg('Apple Sign-In is available on iOS native builds.');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -57,11 +188,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
       // Fallback
     }
 
-    const trimmedEmail = email.trim();
+    const trimmedEmail = email.trim().toLowerCase();
     const trimmedPassword = password.trim();
 
     if (!trimmedEmail || !trimmedPassword) {
-      setFeedbackMsg('Please enter your email and password to continue.');
+      setFeedbackMsg('Please enter both your email address and passcode.');
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setFeedbackMsg('Please enter a valid email address.');
+      return;
+    }
+
+    if (mode === 'create' && trimmedPassword.length < 8) {
+      setFeedbackMsg('Passcode must be at least 8 characters with letters and numbers.');
       return;
     }
 
@@ -79,8 +220,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
         setIsSuccess(true);
         if (onSuccess) {
           onSuccess({
+            id: res.user.id,
             email: res.user.email,
-            name: res.user.profile?.name || res.user.email.split('@')[0]
+            name: res.user.profile?.name || res.user.email.split('@')[0],
+            onboardingCompleted: Boolean(res.user.profile?.onboardingCompleted)
           });
         }
         return;
@@ -93,27 +236,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
         setIsSuccess(true);
         if (onSuccess) {
           onSuccess({
+            id: res.user.id,
             email: res.user.email,
-            name: res.user.profile?.name || res.user.email.split('@')[0]
+            name: res.user.profile?.name || res.user.email.split('@')[0],
+            onboardingCompleted: Boolean(res.user.profile?.onboardingCompleted)
           });
         }
         return;
       }
     } catch (err: any) {
       setIsLoading(false);
-
-      // If backend is offline or unreachable, gracefully fall back to local/offline session
-      if (err instanceof NetworkError || err.message?.includes('Network') || err.message?.includes('fetch')) {
-        if (onSuccess) {
-          onSuccess({
-            email: trimmedEmail,
-            name: trimmedEmail.split('@')[0] || 'Voyager'
-          });
-        }
-        return;
-      }
-
-      // Show invalid credentials or validation message to user
       setFeedbackMsg(err.message || 'Authentication failed. Please check your credentials.');
       return;
     }
@@ -218,32 +350,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
                 <span className="text-sm text-on-surface font-semibold">Apple</span>
               </button>
 
-              {/* Google Button */}
-              <button
-                onClick={() => handleSocialAuth('Google')}
-                className="flex items-center justify-center space-x-2 h-11 px-4 rounded-xl bg-surface-container-lowest hover:bg-surface-container-low border border-outline-variant/30 shadow-xs active:scale-[0.98] transition-all cursor-pointer"
-                type="button"
-              >
-                <svg className="w-4 h-4" viewBox="0 0 24 24">
-                  <path
-                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                    fill="#4285F4"
-                  />
-                  <path
-                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                    fill="#34A853"
-                  />
-                  <path
-                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                    fill="#FBBC05"
-                  />
-                  <path
-                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                    fill="#EA4335"
-                  />
-                </svg>
-                <span className="text-sm text-on-surface font-semibold">Google</span>
-              </button>
+              {/* Google Sign-In Button (Official GIS Rendered Button) */}
+              <div
+                id="google-signin-btn-container"
+                ref={googleButtonContainerRef}
+                className="flex items-center justify-center h-11 w-full overflow-hidden rounded-xl border border-outline-variant/30 bg-surface-container-lowest shadow-xs active:scale-[0.98] transition-all cursor-pointer [&_iframe]:!m-0 [&_iframe]:!w-full [&_iframe]:!max-w-full"
+              />
             </div>
           </div>
 
@@ -400,9 +512,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
             <button
               onClick={() => {
                 setIsSuccess(false);
-                if (onSuccess) {
-                  onSuccess({ email: email || 'user@kairos.ai', name: 'Kairos Voyager' });
-                }
               }}
               className="w-full h-12 rounded-full bg-primary text-on-primary text-sm font-bold shadow-md active:scale-98 cursor-pointer"
               type="button"
@@ -415,3 +524,4 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onSuccess }) => 
     </div>
   );
 };
+

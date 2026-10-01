@@ -14,6 +14,22 @@ export class ProfileService {
     const validatedId = UUIDSchema.parse(userId);
     const validatedData = UpdateProfileSchema.parse(data);
 
+    if (validatedData.handle) {
+      const normalizedHandle = validatedData.handle.trim();
+      const existingProfile = await prisma.userProfile.findFirst({
+        where: {
+          handle: { equals: normalizedHandle, mode: 'insensitive' },
+          userId: { not: validatedId }
+        }
+      });
+      if (existingProfile) {
+        const error: any = new Error(`Handle '${normalizedHandle}' is already taken by another user.`);
+        error.statusCode = 409;
+        error.code = 'HANDLE_ALREADY_TAKEN';
+        throw error;
+      }
+    }
+
     return prisma.userProfile.upsert({
       where: { userId: validatedId },
       update: validatedData,

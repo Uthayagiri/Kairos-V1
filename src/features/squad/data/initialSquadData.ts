@@ -74,11 +74,10 @@ export const INITIAL_SQUAD_MEMBERS: SquadMember[] = [
   },
   {
     id: CURRENT_USER_MEMBER_ID,
-    name: 'Alex (You)',
+    name: 'You',
     isCurrentUser: true,
     role: 'Squad Vanguard',
-    avatar:
-      'https://lh3.googleusercontent.com/aida-public/AB6AXuApyzwKOIPyLa7oDHcQJE3EuKbjR1GAcBM067yYwql352SWV6rEONTW-rXwQA7LF21Oy_2aW49EPGk5qkufisfpv4RKja21xmC4JkEDfZHn416oYqbj0jn7trFhQZUgnWmMRrGibDl-xoTEZBDxs5XENzIG5-Qz9GqnLV1gk_il0keyzXJn7kqxpNqV_ihDVkcsoyaCUW80cJj28dyFp1AvcRW0OIM8AscQiN-8SzIAUxL0xigvSm5OEw',
+    avatar: '',
     xp: 2450,
     tasksCount: 34,
     tag: 'Sprint Mode',
@@ -138,7 +137,7 @@ export const getInitialSquadChallenges = (): Challenge[] => {
         { name: 'Jordan', avatar: INITIAL_SQUAD_MEMBERS[0].avatar },
         { name: 'Maya', avatar: INITIAL_SQUAD_MEMBERS[1].avatar },
         { name: 'Liam', avatar: INITIAL_SQUAD_MEMBERS[2].avatar },
-        { name: 'Alex', avatar: INITIAL_SQUAD_MEMBERS[3].avatar }
+        { name: 'You', avatar: INITIAL_SQUAD_MEMBERS[3].avatar }
       ],
       roster: [
         {
@@ -151,7 +150,7 @@ export const getInitialSquadChallenges = (): Challenge[] => {
           textColor: 'text-emerald-700'
         },
         {
-          name: 'Alex (You)',
+          name: 'You',
           isCurrentUser: true,
           avatar: INITIAL_SQUAD_MEMBERS[3].avatar,
           percentage: 71,
@@ -204,11 +203,11 @@ export const getInitialSquadChallenges = (): Challenge[] => {
       joinedUsers: [
         { name: 'Elena', avatar: INITIAL_SQUAD_MEMBERS[4].avatar },
         { name: 'David', avatar: INITIAL_SQUAD_MEMBERS[5].avatar },
-        { name: 'Alex', avatar: INITIAL_SQUAD_MEMBERS[3].avatar }
+        { name: 'You', avatar: INITIAL_SQUAD_MEMBERS[3].avatar }
       ],
       roster: [
         {
-          name: 'Alex (You)',
+          name: 'You',
           isCurrentUser: true,
           avatar: INITIAL_SQUAD_MEMBERS[3].avatar,
           percentage: 85,
@@ -262,7 +261,7 @@ export const getInitialSquadChallenges = (): Challenge[] => {
         { name: 'Jordan', avatar: INITIAL_SQUAD_MEMBERS[0].avatar },
         { name: 'Maya', avatar: INITIAL_SQUAD_MEMBERS[1].avatar },
         { name: 'Liam', avatar: INITIAL_SQUAD_MEMBERS[2].avatar },
-        { name: 'Alex', avatar: INITIAL_SQUAD_MEMBERS[3].avatar },
+        { name: 'You', avatar: INITIAL_SQUAD_MEMBERS[3].avatar },
         { name: 'Elena', avatar: INITIAL_SQUAD_MEMBERS[4].avatar }
       ],
       roster: [
@@ -275,7 +274,7 @@ export const getInitialSquadChallenges = (): Challenge[] => {
           textColor: 'text-indigo-700'
         },
         {
-          name: 'Alex (You)',
+          name: 'You',
           isCurrentUser: true,
           avatar: INITIAL_SQUAD_MEMBERS[3].avatar,
           percentage: 80,

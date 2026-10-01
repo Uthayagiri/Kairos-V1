@@ -1,7 +1,11 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Achievement, FilterState, AchievementCategory, AchievementRarity, GlowStage } from '../types/achievement.types';
 import { INITIAL_ACHIEVEMENTS } from '../data/achievements';
-import { filterAchievements, getAchievementStats } from '../utils/achievementHelpers';
+import {
+  filterAchievements,
+  getAchievementStats,
+  evaluateAchievementsFromProgression
+} from '../utils/achievementHelpers';
 import { progressionManager } from '../../progression/services/progressionManager';
 import {
   STORAGE_DOMAINS,
@@ -65,8 +69,67 @@ export function useAchievementProgress(userProfile?: UserIdentifier) {
   // Sync state on user profile change
   useEffect(() => {
     skipNextSave.current = true;
-    setAchievements(loadAchievementsForUser(userProfile));
+    const initialLoaded = loadAchievementsForUser(userProfile);
+    const state = progressionManager.getState();
+    const streakCount = progressionManager.getCurrentStreak();
+    const { updatedAchievements, newlyUnlocked } = evaluateAchievementsFromProgression(initialLoaded, {
+      streakCount,
+      level: state.level,
+      totalXP: state.totalXP,
+      lifetimeHP: state.lifetimeHP,
+      taskHistory: state.taskHistory
+    });
+
+    if (newlyUnlocked.length > 0) {
+      newlyUnlocked.forEach((ach) => {
+        progressionManager.awardAchievementUnlock({
+          id: ach.id,
+          rarity: ach.rarity,
+          title: ach.name || ach.title
+        });
+      });
+    }
+
+    setAchievements(updatedAchievements);
   }, [userProfile]);
+
+  // Synchronize achievement milestones with live progression events
+  useEffect(() => {
+    const handleProgressionSync = () => {
+      const state = progressionManager.getState();
+      const streakCount = progressionManager.getCurrentStreak();
+      setAchievements((prev) => {
+        const { updatedAchievements, newlyUnlocked } = evaluateAchievementsFromProgression(prev, {
+          streakCount,
+          level: state.level,
+          totalXP: state.totalXP,
+          lifetimeHP: state.lifetimeHP,
+          taskHistory: state.taskHistory
+        });
+
+        if (newlyUnlocked.length > 0) {
+          newlyUnlocked.forEach((ach) => {
+            progressionManager.awardAchievementUnlock({
+              id: ach.id,
+              rarity: ach.rarity,
+              title: ach.name || ach.title
+            });
+          });
+          setUnlockedForCelebration((current) => current || newlyUnlocked[0]);
+        }
+
+        return updatedAchievements;
+      });
+    };
+
+    const unsubscribe = progressionManager.subscribe(() => {
+      handleProgressionSync();
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   const [filters, setFilters] = useState<FilterState>({
     searchQuery: '',

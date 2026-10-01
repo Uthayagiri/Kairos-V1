@@ -89,7 +89,7 @@ export const ProfileUpdatedPayloadSchema = z.object({
   quote: z.string().max(255).optional(),
   timezone: z.string().max(50).optional(),
   circadianType: z.string().max(50).optional(),
-  avatarUrl: z.string().url().max(512).optional(),
+  avatarUrl: z.string().max(512).nullable().optional(),
   bannerTheme: z.string().max(50).optional()
 });
 

@@ -14,7 +14,7 @@ datasource db {
 model User {
   id           String    @id @default(uuid()) @db.Uuid
   email        String    @unique @db.VarChar(255)
-  passwordHash String    @map("password_hash") @db.VarChar(255)
+  passwordHash String?   @map("password_hash") @db.VarChar(255)
   status       String    @default("active") @db.VarChar(50)
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz
@@ -23,6 +23,7 @@ model User {
   // Relations
   profile              UserProfile?
   progression          ProgressionState?
+  oauthAccounts        OAuthAccount[]
   refreshTokens        RefreshToken[]
   tasks                Task[]
   taskCompletions      TaskCompletion[]
@@ -35,6 +36,23 @@ model User {
   syncOperations       SyncOperation[]
 
   @@map("users")
+}
+
+/// External OAuth Account Linkage Table (e.g., Google OAuth)
+model OAuthAccount {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @map("user_id") @db.Uuid
+  provider          String   @db.VarChar(50) // e.g. "google"
+  providerAccountId String   @map("provider_account_id") @db.VarChar(255)
+  profileData       Json?    @map("profile_data")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId], name: "unique_provider_account")
+  @@index([userId])
+  @@map("oauth_accounts")
 }
 
 /// Refresh Token Storage & Rotation Ledger
@@ -56,18 +74,30 @@ model RefreshToken {
 
 /// User Profile & Evolution Metadata Table
 model UserProfile {
-  id            String   @id @default(uuid()) @db.Uuid
-  userId        String   @unique @map("user_id") @db.Uuid
-  name          String   @default("Kairos Voyager") @db.VarChar(100)
-  handle        String?  @db.VarChar(50)
-  bio           String?  @db.Text
-  quote         String?  @db.VarChar(255)
-  timezone      String   @default("UTC") @db.VarChar(50)
-  circadianType String   @default("moderate_early") @map("circadian_type") @db.VarChar(50)
-  avatarUrl     String?  @map("avatar_url") @db.VarChar(512)
-  bannerTheme   String?  @map("banner_theme") @db.VarChar(50)
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id                  String   @id @default(uuid()) @db.Uuid
+  userId              String   @unique @map("user_id") @db.Uuid
+  name                String   @default("Kairos Voyager") @db.VarChar(100)
+  handle              String?  @db.VarChar(50)
+  bio                 String?  @db.Text
+  quote               String?  @db.VarChar(255)
+  timezone            String   @default("UTC") @db.VarChar(50)
+  circadianType       String   @default("moderate_early") @map("circadian_type") @db.VarChar(50)
+  avatarUrl           String?  @map("avatar_url") @db.VarChar(512)
+  bannerTheme         String?  @map("banner_theme") @db.VarChar(50)
+  onboardingCompleted Boolean  @default(false) @map("onboarding_completed")
+  dob                 String?  @db.VarChar(20)
+  occupation          String?  @db.VarChar(50)
+  goals               Json?
+  monthlyFocus        String?  @map("monthly_focus") @db.VarChar(100)
+  workflow            String?  @db.VarChar(50)
+  energyPeak          String?  @map("energy_peak") @db.VarChar(50)
+  challenges          Json?
+  companionName       String?  @map("companion_name") @db.VarChar(50)
+  archetype           String?  @db.VarChar(50)
+  voiceModel          String?  @map("voice_model") @db.VarChar(50)
+  pace                Float?
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

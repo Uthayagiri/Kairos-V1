@@ -19,3 +19,7 @@ backend/.env.*
 
 # Logs
 *.log
+
+# Scratch scripts
+scratch/
+

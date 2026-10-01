@@ -232,7 +232,7 @@ class FullTestSquadService {
   }
 
   loadSquadState(initialChallenges) {
-    const today = formatDateToLocalISO();
+    const today = '2026-09-23';
     const challenges = initialChallenges || [
       {
         id: 'chal-1',

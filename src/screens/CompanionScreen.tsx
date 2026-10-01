@@ -9,7 +9,7 @@ import {
 } from '../features/storage';
 
 interface CompanionScreenProps {
-  userProfile?: { email: string; name: string } | null;
+  userProfile?: { id?: string; email: string; name: string; avatarUrl?: string | null; onboardingCompleted?: boolean } | null;
   onNavigateTab?: (tab: string) => void;
   onBack?: () => void;
 }
@@ -98,8 +98,36 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({
   const [vaultModalOpen, setVaultModalOpen] = useState(false);
   const [voiceStreamOpen, setVoiceStreamOpen] = useState(false);
 
-  // Active Companion Persona
-  const [activePersona, setActivePersona] = useState<Persona>(PERSONAS[0]);
+  // Active Companion Persona derived from persisted user settings
+  const [activePersona, setActivePersona] = useState<Persona>(() => {
+    try {
+      const prefs = getUserScopedJSON<any>(STORAGE_DOMAINS.SETTINGS_PREFERENCES, null, userProfile);
+      if (prefs?.persona) {
+        const found = PERSONAS.find(
+          (p) =>
+            p.id.toLowerCase() === prefs.persona.toLowerCase() ||
+            prefs.persona.toLowerCase().includes(p.name.toLowerCase())
+        );
+        if (found) return found;
+      }
+    } catch {}
+    return PERSONAS[0];
+  });
+
+  // Re-sync active persona if user profile or settings change
+  useEffect(() => {
+    try {
+      const prefs = getUserScopedJSON<any>(STORAGE_DOMAINS.SETTINGS_PREFERENCES, null, userProfile);
+      if (prefs?.persona) {
+        const found = PERSONAS.find(
+          (p) =>
+            p.id.toLowerCase() === prefs.persona.toLowerCase() ||
+            prefs.persona.toLowerCase().includes(p.name.toLowerCase())
+        );
+        if (found) setActivePersona(found);
+      }
+    } catch {}
+  }, [userProfile]);
 
   // Flow HP Progress derived strictly from authoritative progression state
   const hpProgress = useMemo(() => {
@@ -1454,6 +1482,17 @@ export const CompanionScreen: React.FC<CompanionScreenProps> = ({
                     onClick={() => {
                       triggerHaptic(ImpactStyle.Light);
                       setActivePersona(persona);
+                      try {
+                        const prefs = getUserScopedJSON<any>(STORAGE_DOMAINS.SETTINGS_PREFERENCES, {}, userProfile) || {};
+                        setUserScopedJSON(
+                          STORAGE_DOMAINS.SETTINGS_PREFERENCES,
+                          {
+                            ...prefs,
+                            persona: `${persona.name} (${persona.title.split(' ')[0]})`
+                          },
+                          userProfile
+                        );
+                      } catch {}
                       showToast(`Switched companion to ${persona.name}`);
                     }}
                   >

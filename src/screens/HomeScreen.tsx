@@ -44,7 +44,7 @@ export const STORAGE_KEY_PINNED_REMINDER = 'KAIROS_PINNED_REMINDER_V1';
 export const STORAGE_KEY_DAILY_REFLECTIONS = 'KAIROS_DAILY_REFLECTIONS_V1';
 
 interface HomeScreenProps {
-  userProfile?: { email: string; name: string } | null;
+  userProfile?: { id?: string; email: string; name: string; avatarUrl?: string | null; onboardingCompleted?: boolean } | null;
   onNavigateTab?: (tab: string) => void;
   onOpenNotifications?: () => void;
 }

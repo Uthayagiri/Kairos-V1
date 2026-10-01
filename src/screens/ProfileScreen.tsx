@@ -16,9 +16,10 @@ import {
   Timeline24HourGraph
 } from './ConnectionsScreen';
 import { syncQueue, syncSerializer } from '../features/sync';
+import { authApi } from '../features/auth/authApi';
 
 interface ProfileScreenProps {
-  userProfile?: { email: string; name: string } | null;
+  userProfile?: { id?: string; email: string; name: string; avatarUrl?: string | null } | null;
   onNavigateTab?: (tab: string) => void;
   onOpenSettings?: () => void;
   onOpenWellbeing?: () => void;
@@ -149,6 +150,7 @@ export interface UserProfileExtension {
   kairosId?: string;
   userQuote?: string;
   showcaseIds?: string[];
+  avatarUrl?: string | null;
 }
 
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({
@@ -255,6 +257,25 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     } catch {}
   }, [userProfile]);
 
+  const userAvatar = useMemo(() => {
+    if (userProfile?.avatarUrl && !userProfile.avatarUrl.includes('aida-public')) {
+      return userProfile.avatarUrl;
+    }
+    if (profileExt?.avatarUrl && !profileExt.avatarUrl.includes('aida-public')) {
+      return profileExt.avatarUrl;
+    }
+    return null;
+  }, [userProfile?.avatarUrl, profileExt?.avatarUrl]);
+
+  const userInitials = useMemo(() => {
+    const name = (customName || userProfile?.name || 'Kairos').trim();
+    const parts = name.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+    }
+    return (parts[0]?.[0] || 'K').toUpperCase();
+  }, [customName, userProfile?.name]);
+
   const [isCustomizeShowcaseOpen, setIsCustomizeShowcaseOpen] = useState(false);
   const [tempShowcaseIds, setTempShowcaseIds] = useState<string[]>([]);
 
@@ -269,14 +290,25 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     setProfileExt(updated);
     try {
       setUserScopedJSON(STORAGE_DOMAINS.PROFILE_EXTENSION, updated);
-      syncQueue.enqueue(
-        'PROFILE_UPDATED',
-        syncSerializer.profileUpdated({
+
+      // Direct authoritative update on backend
+      authApi
+        .updateProfile({
           name: updated.customName || undefined,
           handle: updated.kairosId || undefined,
           quote: updated.userQuote || undefined
         })
-      );
+        .catch(() => {
+          // If offline, enqueue for background batch sync
+          syncQueue.enqueue(
+            'PROFILE_UPDATED',
+            syncSerializer.profileUpdated({
+              name: updated.customName || undefined,
+              handle: updated.kairosId || undefined,
+              quote: updated.userQuote || undefined
+            })
+          );
+        });
     } catch {}
   };
 
@@ -416,7 +448,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       typeof window !== 'undefined' && window.location.origin
         ? window.location.origin
         : 'http://localhost:3000';
-    const cleanHandle = (kairosId || 'alex.kairos').replace(/^@/, '');
+    const cleanHandle = (kairosId || 'voyager.kairos').replace(/^@/, '');
     const profileUrl = `${origin}/?profile=${encodeURIComponent(cleanHandle)}`;
     navigator.clipboard?.writeText(profileUrl);
     setCopyFeedback(true);
@@ -432,7 +464,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       typeof window !== 'undefined' && window.location.origin
         ? window.location.origin
         : 'http://localhost:3000';
-    const cleanHandle = (kairosId || 'alex.kairos').replace(/^@/, '');
+    const cleanHandle = (kairosId || 'voyager.kairos').replace(/^@/, '');
     const profileUrl = `${origin}/?profile=${encodeURIComponent(cleanHandle)}`;
     if (navigator.share) {
       try {
@@ -479,12 +511,18 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               {/* Profile Avatar */}
               <div className="relative shrink-0">
                 <div className="p-[2.5px] rounded-full bg-gradient-to-tr from-[#f09433] via-[#e6683c] via-[#dc2743] via-[#cc2366] to-[#bc1888] shadow-md">
-                  <div className="p-[2px] rounded-full bg-surface-container-lowest">
-                    <img
-                      alt="Profile avatar"
-                      className="w-16 h-16 rounded-full object-cover"
-                      src="https://lh3.googleusercontent.com/aida-public/AB6AXuApyzwKOIPyLa7oDHcQJE3EuKbjR1GAcBM067yYwql352SWV6rEONTW-rXwQA7LF21Oy_2aW49EPGk5qkufisfpv4RKja21xmC4JkEDfZHn416oYqbj0jn7trFhQZUgnWmMRrGibDl-xoTEZBDxs5XENzIG5-Qz9GqnLV1gk_il0keyzXJn7kqxpNqV_ihDVkcsoyaCUW80cJj28dyFp1AvcRW0OIM8AscQiN-8SzIAUxL0xigvSm5OEw"
-                    />
+                  <div className="p-[2px] rounded-full bg-surface-container-lowest flex items-center justify-center">
+                    {userAvatar ? (
+                      <img
+                        alt={`${customName} avatar`}
+                        className="w-16 h-16 rounded-full object-cover"
+                        src={userAvatar}
+                      />
+                    ) : (
+                      <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary to-primary-container flex items-center justify-center text-on-primary font-bold text-xl shadow-inner select-none">
+                        {userInitials}
+                      </div>
+                    )}
                   </div>
                 </div>
                 {/* Plus / Active status badge on avatar */}
@@ -1231,11 +1269,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             </div>
 
             <div className="flex items-center gap-2 mb-1">
-              <img
-                alt={`${displayName} avatar`}
-                className="w-7 h-7 rounded-full object-cover ring-2 ring-primary/20"
-                src="https://lh3.googleusercontent.com/aida-public/AB6AXuApyzwKOIPyLa7oDHcQJE3EuKbjR1GAcBM067yYwql352SWV6rEONTW-rXwQA7LF21Oy_2aW49EPGk5qkufisfpv4RKja21xmC4JkEDfZHn416oYqbj0jn7trFhQZUgnWmMRrGibDl-xoTEZBDxs5XENzIG5-Qz9GqnLV1gk_il0keyzXJn7kqxpNqV_ihDVkcsoyaCUW80cJj28dyFp1AvcRW0OIM8AscQiN-8SzIAUxL0xigvSm5OEw"
-              />
+              {userAvatar ? (
+                <img
+                  alt={`${displayName} avatar`}
+                  className="w-7 h-7 rounded-full object-cover ring-2 ring-primary/20"
+                  src={userAvatar}
+                />
+              ) : (
+                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary to-primary-container flex items-center justify-center text-on-primary font-bold text-xs shadow-inner ring-2 ring-primary/20 select-none">
+                  {userInitials}
+                </div>
+              )}
               <span className="font-label-md text-label-md font-bold text-on-surface">{displayName}</span>
             </div>
             <span className="font-label-sm text-xs text-on-surface-variant mb-4 px-2 leading-tight">
@@ -1398,7 +1442,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             {/* Unique QR Code Card */}
             <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 shadow-inner flex flex-col items-center w-full">
               <UniqueQRCodeSVG
-                seed={kairosId || userProfile?.name || 'alex.rivera'}
+                seed={kairosId || userProfile?.name || 'voyager'}
                 size={160}
                 centerBadgeText="K"
               />
@@ -2006,7 +2050,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       <BottomNavBar
         activeTab="profile"
         onNavigateTab={onNavigateTab}
-        userInitial={userProfile?.name?.[0] || 'A'}
+        userInitial={userInitials?.[0] || userProfile?.name?.[0] || 'K'}
       />
     </div>
   );

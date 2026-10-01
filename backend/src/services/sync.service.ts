@@ -443,6 +443,80 @@ export class SyncService {
     }
   }
 
+  /**
+   * Retrieves the comprehensive authoritative application state snapshot for an authenticated user.
+   */
+  public async getUserFullState(userId: string) {
+    const validatedUserId = UUIDSchema.parse(userId);
+    const today = new Date().toISOString().split('T')[0];
+
+    const [progression, tasks, achievements, profile, reflections, focusSessions, todayCompletions, recentCompletions] = await Promise.all([
+      progressionService.getProgression(validatedUserId),
+      taskService.getUserTasks(validatedUserId),
+      prisma.achievementProgress.findMany({
+        where: { userId: validatedUserId }
+      }),
+      profileService.getProfile(validatedUserId),
+      prisma.dailyReflection.findMany({
+        where: { userId: validatedUserId },
+        orderBy: { date: 'desc' },
+        take: 30
+      }),
+      prisma.focusSession.findMany({
+        where: { userId: validatedUserId },
+        orderBy: { completedAt: 'desc' },
+        take: 50
+      }),
+      prisma.taskCompletion.findMany({
+        where: {
+          userId: validatedUserId,
+          completionDate: today
+        }
+      }),
+      prisma.taskCompletion.findMany({
+        where: { userId: validatedUserId },
+        orderBy: { completedAt: 'desc' },
+        take: 100
+      })
+    ]);
+
+    const completedTaskIdsToday = todayCompletions.map((c) => c.taskId);
+    const taskHistory = recentCompletions.map((c) => ({
+      taskId: c.taskId,
+      taskTitle: c.taskId,
+      hpAwarded: c.earnedHp,
+      xpAwarded: c.earnedXp,
+      completedAt: c.completedAt.toISOString(),
+      date: c.completionDate
+    }));
+
+    const cursorVersion = progression?.version ? Number(progression.version) : 1;
+
+    return {
+      success: true,
+      serverTime: new Date().toISOString(),
+      cursorVersion,
+      snapshots: {
+        progression: {
+          totalXp: progression.totalXp,
+          xpRemainder: progression.xpRemainder,
+          level: progression.level,
+          todayHp: progression.todayHp,
+          lifetimeHp: progression.lifetimeHp,
+          streakCount: progression.streakCount,
+          lastActiveDate: progression.lastActiveDate,
+          completedTaskIdsToday,
+          taskHistory
+        },
+        tasks,
+        achievements,
+        profile,
+        reflections,
+        focusSessions
+      }
+    };
+  }
+
   private getEntityTypeForOperation(type: string): string {
     if (type.startsWith('TASK_')) return 'task';
     if (type.startsWith('ACHIEVEMENT_')) return 'achievement';

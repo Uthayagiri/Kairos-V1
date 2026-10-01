@@ -1,4 +1,4 @@
-import { Achievement, FilterState, AchievementRarity } from '../types/achievement.types';
+import { Achievement, FilterState, AchievementRarity, GlowStage } from '../types/achievement.types';
 import { getDeltaXPForLevel } from '../../progression/services/progressionEngine';
 
 export const ACHIEVEMENT_RARITY_XP_PERCENTAGES: Record<AchievementRarity, number> = {
@@ -141,5 +141,114 @@ export function getAchievementStats(achievements: Achievement[], currentLevel: n
     earnedXp,
     completionPercentage
   };
+}
+
+export interface ProgressionEvaluationContext {
+  streakCount: number;
+  level: number;
+  totalXP: number;
+  lifetimeHP: number;
+  taskHistory?: Array<{ taskId: string; date?: string; completedAt?: string; hpAwarded?: number }>;
+  focusSessionsCount?: number;
+  hasCustomizedProfile?: boolean;
+}
+
+/**
+ * Derives and synchronizes achievement progress from authoritative progression data.
+ */
+export function evaluateAchievementsFromProgression(
+  achievements: Achievement[],
+  context: ProgressionEvaluationContext
+): { updatedAchievements: Achievement[]; newlyUnlocked: Achievement[] } {
+  const history = context.taskHistory || [];
+  const completedTasksCount = history.length;
+  const uniqueDates = new Set(history.map((h) => h.date || h.completedAt?.slice(0, 10)).filter(Boolean));
+  const activeDaysCount = Math.max(uniqueDates.size, context.streakCount > 0 ? context.streakCount : 0);
+
+  const taskCountByDay = new Map<string, number>();
+  history.forEach((h) => {
+    const day = h.date || h.completedAt?.slice(0, 10);
+    if (day) {
+      taskCountByDay.set(day, (taskCountByDay.get(day) || 0) + 1);
+    }
+  });
+  let perfectDaysCount = 0;
+  taskCountByDay.forEach((count) => {
+    if (count >= 3) perfectDaysCount++;
+  });
+
+  const newlyUnlocked: Achievement[] = [];
+
+  const updatedAchievements = achievements.map((ach) => {
+    const wasUnlocked = Boolean(ach.unlocked || ach.isUnlocked);
+    let progress = typeof ach.currentProgress === 'number' ? ach.currentProgress : 0;
+
+    switch (ach.category) {
+      case 'streak':
+        progress = Math.max(progress, context.streakCount);
+        break;
+      case 'task-mastery':
+        progress = Math.max(progress, completedTasksCount);
+        break;
+      case 'level-milestones':
+        progress = Math.max(progress, context.level);
+        break;
+      case 'loyalty':
+        progress = Math.max(progress, activeDaysCount);
+        break;
+      case 'perfect-performance':
+        progress = Math.max(progress, perfectDaysCount);
+        break;
+      case 'lifetime':
+        progress = Math.max(progress, context.lifetimeHP);
+        break;
+      case 'challenge':
+        if (context.focusSessionsCount !== undefined) {
+          progress = Math.max(progress, context.focusSessionsCount);
+        }
+        break;
+      case 'ai-companion':
+        if (context.hasCustomizedProfile) {
+          progress = Math.max(progress, 1);
+        }
+        break;
+      default:
+        break;
+    }
+
+    const target = ach.targetProgress || 1;
+    const clampedProgress = Math.min(target, Math.max(0, progress));
+    const isNowUnlocked = wasUnlocked || clampedProgress >= target;
+    const ratio = target > 0 ? clampedProgress / target : 0;
+
+    let glowStage: GlowStage = ach.glowStage || 'LOCKED';
+    if (isNowUnlocked) {
+      glowStage = 'UNLOCKED';
+    } else if (ratio >= 0.75) {
+      glowStage = 'NEAR_COMPLETION';
+    } else if (ratio > 0.25) {
+      glowStage = 'IN_PROGRESS';
+    } else if (ratio > 0) {
+      glowStage = 'DISCOVERED';
+    }
+
+    const updated: Achievement = {
+      ...ach,
+      rewardHP: 0,
+      currentProgress: isNowUnlocked ? target : clampedProgress,
+      unlocked: isNowUnlocked,
+      isUnlocked: isNowUnlocked,
+      unlockDate: isNowUnlocked ? (ach.unlockDate || 'Just now') : undefined,
+      glowStage
+    };
+
+    if (!wasUnlocked && isNowUnlocked) {
+      newlyUnlocked.push(updated);
+    }
+
+    return updated;
+  });
+
+  return { updatedAchievements, newlyUnlocked };
 }
 

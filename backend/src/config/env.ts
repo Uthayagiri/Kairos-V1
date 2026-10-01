@@ -49,7 +49,10 @@ const envSchema = z.object({
     .string()
     .default('20')
     .transform((val) => parseInt(val, 10))
-    .pipe(z.number().positive())
+    .pipe(z.number().positive()),
+
+  // Google OAuth Verification
+  GOOGLE_CLIENT_ID: z.string().optional().default('')
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

@@ -13,6 +13,9 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
   const [isExiting, setIsExiting] = useState(false);
   const completedRef = useRef(false);
 
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+
   // Smooth loading progression that auto-advances to 100% and triggers onComplete
   useEffect(() => {
     let current = 0;
@@ -21,7 +24,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
     const incrementStep = 100 / (duration / intervalTime);
 
     const timer = setInterval(() => {
-      current += incrementStep + (Math.random() * 0.4 - 0.2);
+      current += incrementStep;
       if (current >= 100) {
         current = 100;
         setProgress(100);
@@ -34,9 +37,9 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
           setTimeout(() => {
             setIsExiting(true);
             setTimeout(() => {
-              onComplete();
+              onCompleteRef.current();
             }, 300);
-          }, 250);
+          }, 200);
         }
       } else {
         const rounded = Math.floor(current);
@@ -57,7 +60,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
     return () => {
       clearInterval(timer);
     };
-  }, [onComplete]);
+  }, []);
 
   // Canvas particle animation
   useEffect(() => {
@@ -257,7 +260,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
     };
   }, []);
 
-  // Optional tap handler: if user clicks before auto-transition, skip immediately to next screen
+  // Interactive tap handler: provides haptic and ripple visual feedback without skipping splash duration
   const handleInteraction = async (e: React.MouseEvent<HTMLDivElement>) => {
     try {
       await Haptics.impact({ style: ImpactStyle.Light });
@@ -277,16 +280,6 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
       ripple.style.top = `${e.clientY - rect.top - size / 2}px`;
       portal.appendChild(ripple);
       setTimeout(() => ripple.remove(), 800);
-    }
-
-    if (!completedRef.current) {
-      completedRef.current = true;
-      setProgress(100);
-      setStatusText('System Ready');
-      setIsExiting(true);
-      setTimeout(() => {
-        onComplete();
-      }, 250);
     }
   };
 

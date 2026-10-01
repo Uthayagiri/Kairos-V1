@@ -39,6 +39,14 @@ class AuthSessionManager {
   }
 
   /**
+   * Sets or updates current authenticated user and notifies listeners.
+   */
+  public setCurrentUser(user: SafeAuthUser | null): void {
+    this.currentUser = user;
+    this.notifyListeners();
+  }
+
+  /**
    * Checks if an authenticated in-memory session exists.
    */
   public isAuthenticated(): boolean {

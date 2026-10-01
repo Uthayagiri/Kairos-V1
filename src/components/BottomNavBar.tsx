@@ -16,7 +16,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
 }) => {
   const displayInitial =
     userInitial ||
-    (userProfile?.name ? userProfile.name.charAt(0).toUpperCase() : 'A');
+    (userProfile?.name ? userProfile.name.charAt(0).toUpperCase() : 'K');
   const triggerHaptic = (style: ImpactStyle = ImpactStyle.Light) => {
     try {
       Haptics.impact({ style }).catch(() => {});

@@ -23,7 +23,7 @@ import {
 } from '../features/squad';
 
 interface SquadScreenProps {
-  userProfile?: { email: string; name: string } | null;
+  userProfile?: { id?: string; email: string; name: string; avatarUrl?: string | null } | null;
   onNavigateTab?: (tab: string) => void;
   onOpenConnections?: () => void;
 }
@@ -124,6 +124,15 @@ export const SquadScreen: React.FC<SquadScreenProps> = ({
   const todayStr = useMemo(() => formatDateToLocalISO(currentTime), [currentTime]);
 
   const currentUserName = userProfile?.name ? `${userProfile.name} (You)` : 'Voyager (You)';
+  const currentUserAvatar = userProfile?.avatarUrl && !userProfile.avatarUrl.includes('aida-public') ? userProfile.avatarUrl : '';
+  const currentUserInitials = useMemo(() => {
+    const name = (userProfile?.name || 'Voyager').trim();
+    const parts = name.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+    }
+    return (parts[0]?.[0] || 'V').toUpperCase();
+  }, [userProfile?.name]);
   const currentUserXP = typeof progression.totalXP === 'number' ? progression.totalXP : 0;
   const currentUserTasksCount = Array.isArray(progression.rawState?.taskHistory) ? progression.rawState.taskHistory.length : 0;
 
@@ -135,7 +144,7 @@ export const SquadScreen: React.FC<SquadScreenProps> = ({
           rank: idx + 1,
           name: currentUserName,
           isCurrentUser: true,
-          avatar: m.avatar,
+          avatar: currentUserAvatar,
           xp: currentUserXP,
           tasksCount: currentUserTasksCount,
           statusText: `${currentUserTasksCount} tasks achieved this week`,
@@ -156,7 +165,7 @@ export const SquadScreen: React.FC<SquadScreenProps> = ({
         tag: m.tag
       };
     });
-  }, [currentUserName, currentUserXP, currentUserTasksCount]);
+  }, [currentUserName, currentUserAvatar, currentUserXP, currentUserTasksCount]);
 
   // Modals & Toasts
   const [selectedChallengeIndex, setSelectedChallengeIndex] = useState<number | null>(null);
@@ -424,8 +433,7 @@ export const SquadScreen: React.FC<SquadScreenProps> = ({
       joinedUsers: [
         {
           name: userProfile?.name || 'Voyager',
-          avatar:
-            'https://lh3.googleusercontent.com/aida-public/AB6AXuApyzwKOIPyLa7oDHcQJE3EuKbjR1GAcBM067yYwql352SWV6rEONTW-rXwQA7LF21Oy_2aW49EPGk5qkufisfpv4RKja21xmC4JkEDfZHn416oYqbj0jn7trFhQZUgnWmMRrGibDl-xoTEZBDxs5XENzIG5-Qz9GqnLV1gk_il0keyzXJn7kqxpNqV_ihDVkcsoyaCUW80cJj28dyFp1AvcRW0OIM8AscQiN-8SzIAUxL0xigvSm5OEw'
+          avatar: currentUserAvatar
         },
         ...invitedSquad.map((m) => ({ name: m.name, avatar: m.avatar }))
       ],
@@ -433,8 +441,7 @@ export const SquadScreen: React.FC<SquadScreenProps> = ({
         {
           name: `${userProfile?.name || 'Voyager'} (You)`,
           isCurrentUser: true,
-          avatar:
-            'https://lh3.googleusercontent.com/aida-public/AB6AXuApyzwKOIPyLa7oDHcQJE3EuKbjR1GAcBM067yYwql352SWV6rEONTW-rXwQA7LF21Oy_2aW49EPGk5qkufisfpv4RKja21xmC4JkEDfZHn416oYqbj0jn7trFhQZUgnWmMRrGibDl-xoTEZBDxs5XENzIG5-Qz9GqnLV1gk_il0keyzXJn7kqxpNqV_ihDVkcsoyaCUW80cJj28dyFp1AvcRW0OIM8AscQiN-8SzIAUxL0xigvSm5OEw',
+          avatar: currentUserAvatar,
           percentage: 0,
           detail: `0 / ${newDuration} days done`,
           ringColor: 'text-primary',
@@ -721,11 +728,17 @@ export const SquadScreen: React.FC<SquadScreenProps> = ({
                     4
                   </span>
                   <div className="relative">
-                    <img
-                      alt={`${currentUserName} Profile`}
-                      className="w-9 h-9 rounded-full object-cover"
-                      src={leaderboardList[3]?.avatar || LEADERBOARD_DATA[3].avatar}
-                    />
+                    {leaderboardList[3]?.avatar ? (
+                      <img
+                        alt={`${currentUserName} Profile`}
+                        className="w-9 h-9 rounded-full object-cover"
+                        src={leaderboardList[3].avatar}
+                      />
+                    ) : (
+                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary to-primary-container flex items-center justify-center text-on-primary font-bold text-xs shadow-inner select-none">
+                        {currentUserInitials}
+                      </div>
+                    )}
                     <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-secondary ring-1 ring-surface-container-lowest" />
                   </div>
                   <div className="flex flex-col">

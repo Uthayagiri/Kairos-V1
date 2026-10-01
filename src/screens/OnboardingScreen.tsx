@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { authApi } from '../features/auth/authApi';
+import { progressionManager } from '../features/progression';
 
 interface OnboardingScreenProps {
-  userProfile?: { email: string; name: string } | null;
+  userProfile?: { email: string; name: string; id?: string; avatarUrl?: string | null } | null;
   onBack: () => void;
-  onFinish: () => void;
+  onFinish: (updatedUser?: any) => void;
 }
 
 const OCCUPATIONS = [
@@ -151,30 +153,32 @@ const VOICES = [
 export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ userProfile, onBack, onFinish }) => {
   const [step, setStep] = useState<number>(1);
 
-  // Step 1 State
+  // Step 1 State: About You (Prefill name/email only from authenticated user; no auto-completed answers)
   const [preferredName, setPreferredName] = useState(userProfile?.name || '');
-  const [dob, setDob] = useState('2001-08-14');
-  const [occupation, setOccupation] = useState('college');
+  const [dob, setDob] = useState('');
+  const [occupation, setOccupation] = useState('');
 
-  // Step 2 State
-  const [selectedGoals, setSelectedGoals] = useState<string[]>(['deep-work', 'daily-habits', 'ai-partner']);
-  const [monthlyFocus, setMonthlyFocus] = useState('Career Growth');
+  // Step 2 State: Intentions & Goals (Unanswered by default)
+  const [selectedGoals, setSelectedGoals] = useState<string[]>([]);
+  const [monthlyFocus, setMonthlyFocus] = useState('');
 
-  // Step 3 State
-  const [workflow, setWorkflow] = useState('autonomous');
-  const [energyPeak, setEnergyPeak] = useState('early');
-  const [challenges, setChallenges] = useState<string[]>(['Context switching', 'Procrastination']);
+  // Step 3 State: Professional Rhythm (Unanswered by default)
+  const [workflow, setWorkflow] = useState('');
+  const [energyPeak, setEnergyPeak] = useState('');
+  const [challenges, setChallenges] = useState<string[]>([]);
 
-  // Step 4 State
-  const [companionName, setCompanionName] = useState('Kairos');
-  const [archetype, setArchetype] = useState('warm');
-  const [selectedVoice, setSelectedVoice] = useState('aura');
+  // Step 4 State: AI Companion Customization (Unanswered by default)
+  const [companionName, setCompanionName] = useState('');
+  const [archetype, setArchetype] = useState('');
+  const [selectedVoice, setSelectedVoice] = useState('');
   const [playingVoice, setPlayingVoice] = useState<string | null>(null);
   const [pace, setPace] = useState(1.0);
 
-  // Completion State
+  // Validation & Submission State
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [completedUser, setCompletedUser] = useState<any>(null);
 
   const triggerHaptic = (style: ImpactStyle = ImpactStyle.Light) => {
     try {
@@ -184,16 +188,102 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ userProfile,
     }
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     triggerHaptic(ImpactStyle.Medium);
-    if (step < 4) {
-      setStep(step + 1);
-    } else {
+    setValidationError(null);
+
+    // Strict Step 1 Validation
+    if (step === 1) {
+      if (!preferredName || !preferredName.trim()) {
+        setValidationError('Please enter your preferred name.');
+        return;
+      }
+      if (!dob || !dob.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(dob.trim())) {
+        setValidationError('Please select your date of birth.');
+        return;
+      }
+      if (!occupation || !occupation.trim()) {
+        setValidationError('Please select your primary occupation.');
+        return;
+      }
+      setStep(2);
+      return;
+    }
+
+    // Strict Step 2 Validation
+    if (step === 2) {
+      if (!selectedGoals || selectedGoals.length === 0) {
+        setValidationError('Please select at least one goal or intention.');
+        return;
+      }
+      if (!monthlyFocus || !monthlyFocus.trim()) {
+        setValidationError('Please select your #1 monthly focus for the next 30 days.');
+        return;
+      }
+      setStep(3);
+      return;
+    }
+
+    // Strict Step 3 Validation
+    if (step === 3) {
+      if (!workflow || !workflow.trim()) {
+        setValidationError('Please select your typical daily workflow.');
+        return;
+      }
+      if (!energyPeak || !energyPeak.trim()) {
+        setValidationError('Please select your peak cognitive energy window.');
+        return;
+      }
+      if (!challenges || challenges.length === 0) {
+        setValidationError('Please select at least one day-to-day friction point.');
+        return;
+      }
+      setStep(4);
+      return;
+    }
+
+    // Strict Step 4 Validation
+    if (step === 4) {
+      if (!companionName || !companionName.trim()) {
+        setValidationError('Please enter a name for your AI Companion.');
+        return;
+      }
+      if (!archetype || !archetype.trim()) {
+        setValidationError('Please select an archetype style for your Companion.');
+        return;
+      }
+      if (!selectedVoice || !selectedVoice.trim()) {
+        setValidationError('Please select a voice model for your Companion.');
+        return;
+      }
+
+      // Submit manual questionnaire to backend
       setIsSubmitting(true);
-      setTimeout(() => {
+      try {
+        const user = await authApi.submitOnboarding({
+          preferredName: preferredName.trim(),
+          dob: dob.trim(),
+          occupation: occupation.trim(),
+          goals: selectedGoals,
+          monthlyFocus: monthlyFocus.trim(),
+          workflow: workflow.trim(),
+          energyPeak: energyPeak.trim(),
+          challenges,
+          companionName: companionName.trim(),
+          archetype: archetype.trim(),
+          voiceModel: selectedVoice.trim(),
+          pace
+        });
+        if (user) {
+          setCompletedUser(user);
+        }
+      } catch (err) {
+        // Even if offline, proceed with local profile calibration
+        setCompletedUser({ name: preferredName.trim() });
+      } finally {
         setIsSubmitting(false);
         setShowSuccessModal(true);
-      }, 900);
+      }
     }
   };
 
@@ -875,6 +965,13 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ userProfile,
 
       {/* FIXED BOTTOM ACTION FOOTER */}
       <footer className="w-full px-5 py-3.5 pb-safe bg-surface/95 backdrop-blur-lg border-t border-surface-container-high/60 z-40 flex-shrink-0 flex flex-col gap-2">
+        {validationError && (
+          <div className="p-3 rounded-2xl bg-error-container/80 border border-error/30 text-on-error-container text-xs font-semibold flex items-center gap-2 animate-fade-in shadow-sm">
+            <span className="material-symbols-outlined text-base text-error">error</span>
+            <span>{validationError}</span>
+          </div>
+        )}
+
         <button
           onClick={handleNext}
           disabled={isSubmitting}
@@ -931,7 +1028,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ userProfile,
             <button
               onClick={() => {
                 setShowSuccessModal(false);
-                onFinish();
+                onFinish(completedUser || { name: preferredName.trim() });
               }}
               className="w-full h-13 rounded-full bg-primary text-on-primary font-bold text-sm shadow-md active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
               type="button"

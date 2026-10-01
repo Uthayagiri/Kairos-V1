@@ -612,5 +612,181 @@ describe('Kairos Backend Authentication & Security Suite (Phase E.4)', () => {
       assert.ok(app.hasPlugin('@fastify/rate-limit') || (app as any).rateLimit !== undefined);
     });
   });
+
+  // -------------------------------------------------------------
+  // 9. Google OAuth Endpoint & Identity Linking
+  // -------------------------------------------------------------
+  describe('Google OAuth Endpoint & Validation (POST /api/v1/auth/google)', () => {
+    test('31. Rejects Google OAuth payload with missing googleId with 400', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/google',
+        payload: {
+          email: 'googleuser@gmail.com',
+          name: 'Google User'
+        }
+      });
+
+      assert.equal(response.statusCode, 400);
+      const body = JSON.parse(response.body);
+      assert.equal(body.error, 'Bad Request');
+    });
+
+    test('32. Rejects Google OAuth payload with invalid email with 400', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/google',
+        payload: {
+          googleId: 'google-uid-12345',
+          email: 'not-an-email'
+        }
+      });
+
+      assert.equal(response.statusCode, 400);
+      const body = JSON.parse(response.body);
+      assert.equal(body.error, 'Bad Request');
+    });
+
+    test('33. Rejects empty googleId with 400', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/google',
+        payload: {
+          googleId: '   ',
+          email: 'valid@gmail.com'
+        }
+      });
+
+      assert.equal(response.statusCode, 400);
+    });
+
+    test('33b. Backend config loads configured GOOGLE_CLIENT_ID', () => {
+      assert.ok(config.GOOGLE_CLIENT_ID, 'GOOGLE_CLIENT_ID should be configured in backend');
+      assert.equal(
+        config.GOOGLE_CLIENT_ID,
+        '138279147054-8po60obfaprn2c35o7lfueu3755akqgs.apps.googleusercontent.com'
+      );
+    });
+
+    test('33c. verifyGoogleIdToken parses and extracts claims from test ID token', async () => {
+      const mockTestToken = jwt.sign(
+        {
+          sub: 'google-sub-99999',
+          email: 'testuser@kairos.ai',
+          name: 'Test Kairos Voyager',
+          picture: 'https://lh3.googleusercontent.com/a/test-photo',
+          aud: config.GOOGLE_CLIENT_ID,
+          iss: 'https://accounts.google.com'
+        },
+        'test-secret'
+      );
+
+      const verified = await authService.verifyGoogleIdToken(mockTestToken);
+      assert.equal(verified.googleId, 'google-sub-99999');
+      assert.equal(verified.email, 'testuser@kairos.ai');
+      assert.equal(verified.name, 'Test Kairos Voyager');
+      assert.equal(verified.avatarUrl, 'https://lh3.googleusercontent.com/a/test-photo');
+    });
+
+    test('33d. Rejects invalid or unparseable Google ID token', async () => {
+      await assert.rejects(
+        async () => {
+          await authService.verifyGoogleIdToken('invalid-garbage-token-structure');
+        },
+        (err: any) => {
+          return err.statusCode === 401 || err.code === 'INVALID_GOOGLE_TOKEN';
+        }
+      );
+    });
+  });
+
+  // -------------------------------------------------------------
+  // 10. Onboarding Questionnaire Validation (POST /api/v1/auth/onboarding)
+  // -------------------------------------------------------------
+  describe('Onboarding Questionnaire Endpoint & Validation (POST /api/v1/auth/onboarding)', () => {
+    test('34. Rejects unauthenticated request to /onboarding with 401', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/onboarding',
+        payload: {
+          preferredName: 'Alice',
+          dob: '2000-01-01',
+          occupation: 'student',
+          goals: ['deep-work'],
+          monthlyFocus: 'Focus',
+          workflow: 'autonomous',
+          energyPeak: 'early',
+          challenges: ['procrastination'],
+          companionName: 'Kairos',
+          archetype: 'warm',
+          voiceModel: 'aura'
+        }
+      });
+
+      assert.equal(response.statusCode, 401);
+    });
+
+    test('35. Rejects onboarding request with missing required fields with 400', async () => {
+      const { accessToken } = generateAccessToken('a0000000-0000-4000-8000-000000000001');
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/onboarding',
+        headers: {
+          authorization: `Bearer ${accessToken}`
+        },
+        payload: {
+          preferredName: 'Alice',
+          // Missing dob, occupation, goals, etc.
+        }
+      });
+
+      assert.equal(response.statusCode, 400);
+      const body = JSON.parse(response.body);
+      assert.equal(body.error, 'Bad Request');
+    });
+
+    test('36. Rejects onboarding request with empty goals array with 400', async () => {
+      const { accessToken } = generateAccessToken('a0000000-0000-4000-8000-000000000001');
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/onboarding',
+        headers: {
+          authorization: `Bearer ${accessToken}`
+        },
+        payload: {
+          preferredName: 'Alice',
+          dob: '2000-01-01',
+          occupation: 'student',
+          goals: [], // Empty array must be rejected
+          monthlyFocus: 'Focus',
+          workflow: 'autonomous',
+          energyPeak: 'early',
+          challenges: ['procrastination'],
+          companionName: 'Kairos',
+          archetype: 'warm',
+          voiceModel: 'aura'
+        }
+      });
+
+      assert.equal(response.statusCode, 400);
+    });
+  });
+
+  // -------------------------------------------------------------
+  // 11. Account Deletion Endpoint (DELETE /api/v1/auth/account)
+  // -------------------------------------------------------------
+  describe('Account Deletion Endpoint (DELETE /api/v1/auth/account)', () => {
+    test('37. Rejects unauthenticated request to /account with 401', async () => {
+      const response = await app.inject({
+        method: 'DELETE',
+        url: '/api/v1/auth/account'
+      });
+
+      assert.equal(response.statusCode, 401);
+    });
+  });
 });
+
 

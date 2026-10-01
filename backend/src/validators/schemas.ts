@@ -13,12 +13,21 @@ export const CreateUserSchema = z.object({
 
 export const CreateProfileSchema = z.object({
   name: z.string().min(1).max(100).default('Kairos Voyager'),
-  handle: z.string().max(50).optional(),
-  bio: z.string().max(1000).optional(),
-  quote: z.string().max(255).optional(),
+  handle: z.string().max(50).nullable().optional(),
+  bio: z.string().max(1000).nullable().optional(),
+  quote: z.string().max(255).nullable().optional(),
   timezone: z.string().max(50).default('UTC'),
   circadianType: z.string().max(50).default('moderate_early'),
-  avatarUrl: z.string().url().max(512).optional()
+  avatarUrl: z.string().max(512).nullable().optional(),
+  bannerTheme: z.string().max(50).nullable().optional(),
+  occupation: z.string().max(50).nullable().optional(),
+  monthlyFocus: z.string().max(100).nullable().optional(),
+  workflow: z.string().max(50).nullable().optional(),
+  energyPeak: z.string().max(50).nullable().optional(),
+  companionName: z.string().max(50).nullable().optional(),
+  archetype: z.string().max(50).nullable().optional(),
+  voiceModel: z.string().max(50).nullable().optional(),
+  pace: z.number().nullable().optional()
 });
 
 export const UpdateProfileSchema = CreateProfileSchema.partial();

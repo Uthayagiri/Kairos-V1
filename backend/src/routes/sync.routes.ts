@@ -44,6 +44,21 @@ export const syncRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
       return reply.status(200).send(batchResponse);
     }
   );
+
+  /**
+   * Authoritative State Pull Endpoint
+   * Returns complete application state snapshot for the authenticated user from PostgreSQL.
+   */
+  fastify.get(
+    '/state',
+    {
+      preHandler: authContextHook
+    },
+    async (request, reply) => {
+      const state = await syncService.getUserFullState(request.userId);
+      return reply.status(200).send(state);
+    }
+  );
 };
 
 export default syncRoutes;

@@ -36,15 +36,20 @@ export const API_CONFIG = {
     API_V1_HEALTH: '/api/v1/health',
     SYNC_STATUS: '/api/v1/sync/status',
 
-    // Authentication (Phase E.4)
+    // Authentication (Phase E.4/E.5)
     AUTH_REGISTER: '/api/v1/auth/register',
     AUTH_LOGIN: '/api/v1/auth/login',
+    AUTH_GOOGLE: '/api/v1/auth/google',
     AUTH_REFRESH: '/api/v1/auth/refresh',
     AUTH_LOGOUT: '/api/v1/auth/logout',
     AUTH_ME: '/api/v1/auth/me',
+    AUTH_ONBOARDING: '/api/v1/auth/onboarding',
+    AUTH_ACCOUNT: '/api/v1/auth/account',
+    AUTH_PROFILE: '/api/v1/auth/profile',
 
     // Synchronization (Phase E.3 / E.5)
-    SYNC_BATCH: '/api/v1/sync/batch'
+    SYNC_BATCH: '/api/v1/sync/batch',
+    SYNC_STATE: '/api/v1/sync/state'
   }
 } as const;
 

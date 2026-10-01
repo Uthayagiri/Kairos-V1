@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { connectivityManager, ConnectivityState } from '../features/sync';
 
 export interface AppTopBarProps {
   subtitle: string;
@@ -43,6 +44,15 @@ export const AppTopBar: React.FC<AppTopBarProps> = ({
   onBack,
   showBackArrow
 }) => {
+  const [connState, setConnState] = useState<ConnectivityState>(connectivityManager.getState());
+
+  useEffect(() => {
+    const unsub = connectivityManager.subscribe((st) => {
+      setConnState(st);
+    });
+    return () => unsub();
+  }, []);
+
   const triggerHaptic = (style: ImpactStyle = ImpactStyle.Light) => {
     try {
       Haptics.impact({ style }).catch(() => { });
@@ -93,9 +103,23 @@ export const AppTopBar: React.FC<AppTopBarProps> = ({
             <span className="font-headline-sm text-sm sm:text-base tracking-tight text-on-surface font-extrabold leading-tight truncate">
               Kairos
             </span>
-            <span className="text-[11px] text-on-surface-variant font-medium leading-tight truncate">
-              {subtitle}
-            </span>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[11px] text-on-surface-variant font-medium leading-tight truncate">
+                {subtitle}
+              </span>
+              {connState === 'OFFLINE' && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-400 text-[9px] font-semibold tracking-wide border border-amber-500/30 shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  Offline
+                </span>
+              )}
+              {connState === 'SYNCING' && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full bg-indigo-500/15 text-indigo-300 text-[9px] font-semibold tracking-wide border border-indigo-500/30 shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />
+                  Syncing
+                </span>
+              )}
+            </div>
           </div>
         </div>
 

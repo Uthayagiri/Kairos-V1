@@ -20,7 +20,7 @@ import { squadService } from '../features/squad';
 import { syncQueue, syncSerializer } from '../features/sync';
 
 interface TasksScreenProps {
-  userProfile?: { email: string; name: string } | null;
+  userProfile?: { id?: string; email: string; name: string; avatarUrl?: string | null; onboardingCompleted?: boolean } | null;
   onNavigateTab: (tab: string) => void;
 }
 

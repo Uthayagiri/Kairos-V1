@@ -12,6 +12,8 @@ import {
 } from './syncTypes';
 import { progressionManager } from '../progression/services/progressionManager';
 import { loadUserCustomTasks, saveUserCustomTasks } from '../progression/services/taskTimingService';
+import { STORAGE_DOMAINS, setUserScopedJSON, getUserScopedJSON } from '../storage';
+import { loadAchievementsForUser } from '../achievements/hooks/useAchievementProgress';
 
 class SyncManager {
   private isSyncing = false;
@@ -218,8 +220,8 @@ class SyncManager {
       }
     }
 
-    // 2. Reconcile Tasks Snapshot (Merge server tasks with local custom tasks)
-    if (Array.isArray(snapshots.tasks) && snapshots.tasks.length > 0) {
+    // 2. Reconcile Tasks Snapshot (Merge/Sync server tasks with local custom tasks)
+    if (Array.isArray(snapshots.tasks)) {
       try {
         const localCustoms = loadUserCustomTasks<any>();
         const localMap = new Map(localCustoms.map((t) => [t.id, t]));
@@ -227,21 +229,35 @@ class SyncManager {
 
         snapshots.tasks.forEach((serverTask: any) => {
           if (!serverTask || !serverTask.taskId) return;
+          const isCustom = serverTask.isCustom || String(serverTask.taskId).startsWith('custom-');
+          if (!isCustom) return;
+
           const local = localMap.get(serverTask.taskId);
-          if (!local && serverTask.isCustom) {
-            // Add server custom task to local store
+          if (!local) {
             localCustoms.push({
               id: serverTask.taskId,
               title: serverTask.title,
-              category: serverTask.category,
+              description: serverTask.description || 'Custom user mission.',
+              category: serverTask.category || 'Gym',
               hp: serverTask.targetHp || 20,
-              status: 'pending',
+              status: serverTask.status || 'pending',
+              priority: serverTask.priority || 'Medium',
               startTime: serverTask.startTime || '14:30',
               endTime: serverTask.endTime || '15:30',
-              startDate: new Date().toISOString().split('T')[0],
-              endDate: new Date().toISOString().split('T')[0]
+              startDate: serverTask.startDate || new Date().toISOString().split('T')[0],
+              endDate: serverTask.endDate || new Date().toISOString().split('T')[0],
+              schedule: serverTask.schedule || 'Single Event / No Repeat',
+              createdAt: serverTask.createdAt || 'Custom Mission',
+              completedAt: serverTask.completedAt || null
             });
             hasChanges = true;
+          } else {
+            // Update existing status if changed on server
+            if (serverTask.status && serverTask.status !== local.status) {
+              local.status = serverTask.status;
+              local.completedAt = serverTask.completedAt || local.completedAt;
+              hasChanges = true;
+            }
           }
         });
 
@@ -252,6 +268,93 @@ class SyncManager {
         console.warn('Failed to reconcile tasks snapshot:', err);
       }
     }
+
+    // 3. Reconcile Achievements Snapshot
+    if (Array.isArray((snapshots as any).achievements)) {
+      try {
+        const serverAchs = (snapshots as any).achievements;
+        const serverMap = new Map<string, any>(serverAchs.map((a: any) => [a.achievementId, a]));
+        const localAchs = loadAchievementsForUser();
+        let achChanges = false;
+
+        const updated = localAchs.map((ach) => {
+          const s = serverMap.get(ach.id);
+          if (s) {
+            const isUnlocked = Boolean(s.unlocked);
+            if (isUnlocked !== ach.unlocked || s.currentProgress !== ach.currentProgress) {
+              achChanges = true;
+              return {
+                ...ach,
+                currentProgress: typeof s.currentProgress === 'number' ? s.currentProgress : ach.currentProgress,
+                unlocked: isUnlocked,
+                isUnlocked: isUnlocked,
+                unlockDate: isUnlocked ? (s.unlockedAt ? new Date(s.unlockedAt).toLocaleDateString() : 'Unlocked') : undefined,
+                glowStage: isUnlocked ? 'UNLOCKED' : ach.glowStage
+              };
+            }
+          }
+          return ach;
+        });
+
+        if (achChanges) {
+          setUserScopedJSON(STORAGE_DOMAINS.ACHIEVEMENTS, updated);
+        }
+      } catch (err) {
+        console.warn('Failed to reconcile achievements snapshot:', err);
+      }
+    }
+
+    // 4. Reconcile Profile Snapshot
+    if ((snapshots as any).profile) {
+      try {
+        const p = (snapshots as any).profile;
+        const currentExt = getUserScopedJSON<any>(STORAGE_DOMAINS.PROFILE_EXTENSION, {});
+        const updatedExt = {
+          ...currentExt,
+          customName: p.name || currentExt.customName,
+          kairosId: p.handle || currentExt.kairosId,
+          userQuote: p.quote || currentExt.userQuote,
+          avatarUrl: p.avatarUrl !== undefined ? p.avatarUrl : currentExt.avatarUrl
+        };
+        setUserScopedJSON(STORAGE_DOMAINS.PROFILE_EXTENSION, updatedExt);
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('kairos_user_profile_updated', {
+              detail: {
+                id: p.userId,
+                name: p.name,
+                avatarUrl: p.avatarUrl,
+                profile: p
+              }
+            })
+          );
+        }
+      } catch (err) {
+        console.warn('Failed to reconcile profile snapshot:', err);
+      }
+    }
+  }
+
+  /**
+   * Authoritative Initial State Pull from Backend (PostgreSQL)
+   * Fetches full application state on login / startup splash.
+   */
+  public async pullInitialState(): Promise<{ success: boolean; data?: any; reason?: string }> {
+    if (!authSession.getAccessToken()) {
+      return { success: false, reason: 'AUTHENTICATION_REQUIRED' };
+    }
+
+    try {
+      const res = await apiClient.get<any>(API_CONFIG.ENDPOINTS.SYNC_STATE);
+      if (res && res.snapshots) {
+        this.reconcileServerSnapshots(res.snapshots);
+        return { success: true, data: res.snapshots };
+      }
+    } catch (err: any) {
+      console.warn('Failed to pull initial state from server:', err);
+    }
+    return { success: false };
   }
 
   /**

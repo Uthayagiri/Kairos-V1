@@ -29,7 +29,8 @@ export const STORAGE_DOMAINS = {
   SYNC_META: 'SYNC_META_V1',
   CONNECTIONS: 'CONNECTIONS_STATE_V1',
   INCOMING_REQUESTS: 'INCOMING_REQUESTS_V1',
-  OUTGOING_REQUESTS: 'OUTGOING_REQUESTS_V1'
+  OUTGOING_REQUESTS: 'OUTGOING_REQUESTS_V1',
+  SETTINGS_PREFERENCES: 'SETTINGS_PREFERENCES_V1'
 } as const;
 
 export type StorageDomainKey = (typeof STORAGE_DOMAINS)[keyof typeof STORAGE_DOMAINS] | string;
@@ -56,7 +57,8 @@ export const LEGACY_GLOBAL_KEYS: Record<string, string> = {
   [STORAGE_DOMAINS.BREAK_INTERVALS]: 'kairos_break_intervals',
   [STORAGE_DOMAINS.CONNECTIONS]: 'KAIROS_CONNECTIONS_STATE_V1',
   [STORAGE_DOMAINS.INCOMING_REQUESTS]: 'KAIROS_INCOMING_REQUESTS_V1',
-  [STORAGE_DOMAINS.OUTGOING_REQUESTS]: 'KAIROS_OUTGOING_REQUESTS_V1'
+  [STORAGE_DOMAINS.OUTGOING_REQUESTS]: 'KAIROS_OUTGOING_REQUESTS_V1',
+  [STORAGE_DOMAINS.SETTINGS_PREFERENCES]: 'KAIROS_SETTINGS_PREFERENCES_V1'
 };
 
 // Internal active user in memory (defaults to reading saved ID or null)
@@ -72,7 +74,7 @@ let currentActiveUserId: string | null = null;
  * - leading/trailing underscores stripped
  */
 export function normalizeUserId(
-  input?: string | { email?: string; id?: string; username?: string; name?: string } | null
+  input?: string | { email?: string; id?: string; userId?: string; username?: string; name?: string } | null
 ): string {
   if (!input) return 'default_user';
 
@@ -80,7 +82,7 @@ export function normalizeUserId(
   if (typeof input === 'string') {
     raw = input;
   } else if (typeof input === 'object') {
-    raw = input.email || input.id || input.username || input.name || '';
+    raw = input.id || input.userId || input.email || input.username || input.name || '';
   }
 
   if (!raw || typeof raw !== 'string') return 'default_user';
