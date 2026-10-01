@@ -14,11 +14,19 @@ function getEnvBaseUrl(): string {
     }
   } catch {}
 
-  // In browser environments on remote production domains (e.g. Cloudflare / HTTPS),
-  // default to current origin rather than dead localhost:5000
-  if (typeof window !== 'undefined' && window.location && window.location.origin) {
+  // In browser environments:
+  if (typeof window !== 'undefined' && window.location && window.location.hostname) {
     const host = window.location.hostname;
-    if (host && host !== 'localhost' && host !== '127.0.0.1') {
+    // When accessing via LAN IP, localhost, or dev machine on port 3000, target backend on port 5000
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(host)
+    ) {
+      return `http://${host}:5000`;
+    }
+    // Remote production domains (e.g. Cloudflare / HTTPS custom domain)
+    if (window.location.origin) {
       return window.location.origin.replace(/\/+$/, '');
     }
   }

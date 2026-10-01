@@ -55,11 +55,19 @@ export async function buildApp(options: FastifyServerOptions = {}): Promise<Fast
 
   // Configure CORS
   const allowedOrigins = config.CORS_ORIGIN.split(',').map((o) => o.trim());
+  const isPrivateLanOrigin = (origin: string): boolean =>
+    /^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}):(3000|5173)$/.test(
+      origin
+    );
+
   await app.register(cors, {
     origin: (origin, cb) => {
-      // Allow requests with no origin (like mobile apps, curl, server-to-server)
+      // Allow requests with no origin (like mobile apps, Capacitor native webviews, curl, server-to-server)
       if (!origin) return cb(null, true);
-      if (allowedOrigins.includes(origin) || allowedOrigins.includes('*') || isDev) {
+      if (allowedOrigins.includes(origin)) {
+        return cb(null, true);
+      }
+      if (isDev && isPrivateLanOrigin(origin)) {
         return cb(null, true);
       }
       return cb(new Error('Not allowed by CORS'), false);
